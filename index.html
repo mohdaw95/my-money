@@ -91,7 +91,9 @@
   /* Modal / sheet */
   .scrim{position:fixed;inset:0;background:rgba(4,9,18,.66);backdrop-filter:blur(3px);z-index:40;display:none;align-items:flex-end;justify-content:center}
   .scrim.open{display:flex}
-  .sheet{background:var(--bg2);width:100%;max-width:520px;border-radius:26px 26px 0 0;border:1px solid var(--line);border-bottom:none;padding:8px 16px calc(20px + env(safe-area-inset-bottom));max-height:92vh;overflow-y:auto;animation:up .22s ease}
+  .sheet{position:relative;background:var(--bg2);width:100%;max-width:520px;border-radius:26px 26px 0 0;border:1px solid var(--line);border-bottom:none;padding:8px 16px calc(20px + env(safe-area-inset-bottom));max-height:92vh;overflow-y:auto;animation:up .22s ease}
+  .sheetX{position:absolute;top:12px;right:14px;z-index:5;width:32px;height:32px;border-radius:50%;background:var(--card);border:1px solid var(--line);color:var(--muted);font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center}
+  .sheetX:active{background:var(--card2)}
   @keyframes up{from{transform:translateY(100%)}to{transform:translateY(0)}}
   .grab{width:40px;height:4px;background:var(--line);border-radius:3px;margin:8px auto 12px}
   .sheet h2{font-size:19px;margin-bottom:14px}
@@ -164,7 +166,7 @@
 
 <!-- ============ SHEET ============ -->
 <div class="scrim" id="scrim" onclick="if(event.target===this)closeSheet()">
-  <div class="sheet" id="sheet"><div class="grab"></div><div id="sheetBody"></div></div>
+  <div class="sheet" id="sheet"><div class="grab"></div><button class="sheetX" onclick="closeSheet()" aria-label="Close">✕</button><div id="sheetBody"></div></div>
 </div>
 <div class="toast" id="toast"></div>
 
