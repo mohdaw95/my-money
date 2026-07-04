@@ -51,6 +51,7 @@
   .cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
   .acard{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px;position:relative;overflow:hidden}
   .acard .ic{font-size:20px}
+  .editpin{font-size:13px;color:var(--dim)}
   .acard .nm{font-size:13px;color:var(--muted);margin-top:6px}
   .acard .bal{font-size:19px;font-weight:800;margin-top:2px;letter-spacing:-.3px}
   .acard .sub{font-size:11px;color:var(--dim);margin-top:2px}
@@ -233,11 +234,11 @@ function render(){
   const goldPL = t.goldQAR - S.gold.reduce((s,g)=>s+toQAR(g.buyJOD,'JOD'),0);
   document.getElementById('cards').innerHTML=`
     <div class="acard tap" onclick="openAccount('main')">
-      <div class="ic">🏦</div><div class="nm">Main account</div>
+      <div class="between"><div class="ic">🏦</div><div class="editpin">✎</div></div><div class="nm">Main account</div>
       <div class="bal">${fmt(S.accounts.main,'QAR')}</div><div class="sub">Qatar · QAR</div>
     </div>
     <div class="acard tap" onclick="openAccount('jordan')">
-      <div class="ic">🇯🇴</div><div class="nm">Jordan account</div>
+      <div class="between"><div class="ic">🇯🇴</div><div class="editpin">✎</div></div><div class="nm">Jordan account</div>
       <div class="bal">${fmt(S.accounts.jordan,'JOD')}</div><div class="sub">≈ ${fmt(t.jordanQAR,'QAR')}</div>
     </div>
     <div class="acard gold tap" onclick="openGold()">
@@ -758,13 +759,23 @@ function openAccount(a){
   const bal=S.accounts[a], cur=accCurrency(a);
   openSheet(`
    <h2>${a==='main'?'🏦 Main account':'🇯🇴 Jordan account'}</h2>
-   <div class="kv"><span>Balance</span><span>${fmt(bal,cur)}</span></div>
+   <div class="kv"><span>Current balance</span><span>${fmt(bal,cur)}</span></div>
    ${a==='jordan'?`<div class="kv"><span>In QAR</span><span>${fmt(toQAR(bal,'JOD'),'QAR')}</span></div>`:''}
-   <label class="f">Adjust balance / set opening amount</label>
-   <div class="amtrow"><input id="adjAmt" type="text" inputmode="decimal" placeholder="amount in ${cur}"><select id="adjMode"><option value="set">Set to</option><option value="add">Add</option><option value="sub">Subtract</option></select></div>
-   <button class="btn" onclick="adjAcc('${a}')">Apply</button>
-   <button class="btn ghost" onclick="transferOpen('${a}')">Transfer to other account</button>
+
+   <label class="f">✎ Edit balance directly (${cur})</label>
+   <input id="accBal" type="text" inputmode="decimal" value="${bal}">
+   <button class="btn" onclick="setAccBal('${a}')">Save balance</button>
+
+   <label class="f" style="margin-top:18px">Or quick adjust</label>
+   <div class="amtrow"><input id="adjAmt" type="text" inputmode="decimal" placeholder="amount in ${cur}"><select id="adjMode"><option value="add">➕ Add</option><option value="sub">➖ Subtract</option></select></div>
+   <button class="btn ghost" onclick="adjAcc('${a}')">Apply adjustment</button>
+   <button class="btn ghost" onclick="transferOpen('${a}')">🔁 Transfer to other account</button>
   `);
+}
+function setAccBal(a){
+  const v=num(document.getElementById('accBal').value);
+  if(isNaN(v))return toast('Enter a number');
+  S.accounts[a]=v; save(); closeSheet(); toast(accName(a)+' balance updated');
 }
 function adjAcc(a){
   const v=num(document.getElementById('adjAmt').value); const mode=document.getElementById('adjMode').value;
@@ -851,14 +862,15 @@ function saveEditTxn(id){
 /* ---------------- ASSETS BREAKDOWN ---------------- */
 function openBreakdown(){
   const t=totals();
-  const row=(k,v,extra='')=>`<div class="kv"><span>${k}${extra?` <span class="dim" style="font-size:11px">${extra}</span>`:''}</span><span>${fmt(v,'QAR')}</span></div>`;
+  const row=(k,v,extra,tapFn)=>`<div class="kv${tapFn?' tap':''}" ${tapFn?`onclick="${tapFn}"`:''}><span>${k}${extra?` <span class="dim" style="font-size:11px">${extra}</span>`:''}</span><span>${fmt(v,'QAR')}${tapFn?' <span class="dim" style="font-size:11px">✎</span>':''}</span></div>`;
   openSheet(`
    <h2>📊 Total assets</h2>
-   ${row('🏦 Main account',t.mainQAR)}
-   ${row('🇯🇴 Jordan account',t.jordanQAR, fmt(S.accounts.jordan,'JOD'))}
-   ${row('🪙 Gold (21k)',t.goldQAR, t.grams.toLocaleString('en',{maximumFractionDigits:2})+' g')}
-   ${row('🚗 Cars receivable',t.carsRecvQAR, S.cars.filter(c=>c.status==='receivable').length+' pending')}
-   ${row('📥 Owed to me',t.receivables)}
+   <p class="hint" style="margin-top:0">Tap any row with ✎ to edit that number.</p>
+   ${row('🏦 Main account',t.mainQAR,'',"openAccount('main')")}
+   ${row('🇯🇴 Jordan account',t.jordanQAR, fmt(S.accounts.jordan,'JOD'),"openAccount('jordan')")}
+   ${row('🪙 Gold (21k)',t.goldQAR, t.grams.toLocaleString('en',{maximumFractionDigits:2})+' g',"openGold()")}
+   ${row('🚗 Cars receivable',t.carsRecvQAR, S.cars.filter(c=>c.status==='receivable').length+' pending',"openCars()")}
+   ${row('📥 Owed to me',t.receivables,'',"closeSheet();render()")}
    <div class="kv" style="border-top:2px solid var(--line);margin-top:4px"><span style="font-weight:800">Total assets</span><span style="font-weight:800;color:var(--green)">${fmt(t.assets,'QAR')}</span></div>
    ${row('📤 You owe (liabilities)',-t.liabilities)}
    <div class="kv" style="border-top:2px solid var(--line);margin-top:4px"><span style="font-weight:800">Net worth</span><span style="font-weight:800">${fmt(t.net,'QAR')}</span></div>
