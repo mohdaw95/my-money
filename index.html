@@ -87,6 +87,12 @@
   .badge.qa{background:#3a1717;color:#f19a9a}
   .badge.uae{background:#0f2f2a;color:#66d9c0}
   .empty{color:var(--dim);font-size:13px;text-align:center;padding:22px}
+  .prsum{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px}
+  .prcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px}
+  .prcard .k{font-size:10px;color:var(--muted);font-weight:600}
+  .prcard .v{font-size:15px;font-weight:800;margin-top:3px}
+  .prcard .v.pos{color:var(--green)} .prcard .v.neg{color:var(--red)}
+  .prcard .more{font-size:9px;color:var(--dim);margin-top:2px}
 
   /* Modal / sheet */
   .scrim{position:fixed;inset:0;background:rgba(4,9,18,.66);backdrop-filter:blur(3px);z-index:40;display:none;align-items:flex-end;justify-content:center}
@@ -156,7 +162,8 @@
   <div class="list" id="carsList"></div>
 
   <!-- PAYABLE / RECEIVABLE -->
-  <div class="sec"><h3>🤝 Payable / Receivable</h3></div>
+  <div class="sec"><h3>🤝 Payable / Receivable</h3><a onclick="openPR()">+ Add</a></div>
+  <div class="prsum" id="prSummary"></div>
   <div class="list" id="prList"></div>
 
   <!-- HISTORY -->
@@ -271,7 +278,12 @@ function render(){
       </div>
     </div>`).join('') : `<div class="empty">No cars yet. Add one or log a car revenue.</div>`;
 
-  // payable/receivable
+  // payable/receivable — statement summary (receivable, payable, and net)
+  document.getElementById('prSummary').innerHTML=`
+    <div class="prcard tap" onclick="openKashf('receivable')"><div class="k">📥 Owed to me</div><div class="v pos">${fmt(t.receivables,'QAR')}</div><div class="more">kashf ›</div></div>
+    <div class="prcard tap" onclick="openKashf('payable')"><div class="k">📤 I owe</div><div class="v neg">${fmt(t.payables,'QAR')}</div><div class="more">kashf ›</div></div>
+    <div class="prcard"><div class="k">Net (owed − owe)</div><div class="v ${t.prNet>=0?'pos':'neg'}">${t.prNet>=0?'+':'−'}${fmt(Math.abs(t.prNet),'QAR')}</div></div>`;
+
   document.getElementById('prList').innerHTML = S.pr.length? S.pr.map(p=>`
     <div class="item">
       <div class="em">${p.type==='receivable'?'📥':'📤'}</div>
@@ -464,12 +476,12 @@ function runAutoSalary(force){
 
 /* ---------------- PAYABLE / RECEIVABLE ---------------- */
 let prType='receivable';
-function openPR(){
-  prType='receivable';
+function openPR(preset){
+  prType=preset||'receivable';
   openSheet(`
    <h2>🤝 Payable / Receivable</h2>
    <label class="f">Type</label>
-   <div class="seg"><button id="pr-recv" class="on" onclick="setPR('receivable')">📥 Owed to me</button><button id="pr-pay" onclick="setPR('payable')">📤 I owe</button></div>
+   <div class="seg"><button id="pr-recv" class="${prType==='receivable'?'on':''}" onclick="setPR('receivable')">📥 Owed to me</button><button id="pr-pay" class="${prType==='payable'?'on':''}" onclick="setPR('payable')">📤 I owe</button></div>
    <label class="f">Person / name</label><input id="prName" placeholder="e.g. Ahmed">
    <label class="f">Amount</label>
    <div class="amtrow"><input id="prAmt" type="text" inputmode="decimal" placeholder="0.00"><select id="prCur">${curOptions('QAR')}</select></div>
@@ -477,6 +489,29 @@ function openPR(){
    ${dateField('prDate')}
    <button class="btn" onclick="savePR()">Save</button>
    <p class="hint">This tracks debts only. When settled you'll be asked which account the money moves to/from.</p>
+  `);
+}
+/* Kashf (statement) — a full list of just receivables OR just payables, with a total */
+function openKashf(type){
+  const isRecv=type==='receivable';
+  const items=S.pr.filter(p=>p.type===type);
+  const total=items.reduce((s,p)=>s+toQAR(p.amount,p.currency),0);
+  openSheet(`
+   <h2>${isRecv?'📥 Owed to me (Kashf)':'📤 I owe (Kashf)'}</h2>
+   <div class="kv"><span style="font-weight:800">Total ${isRecv?'receivable':'payable'}</span><span style="font-weight:800;color:${isRecv?'var(--green)':'var(--red)'}">${fmt(total,'QAR')}</span></div>
+   <div class="list" style="margin-top:12px">
+     ${items.length? items.map(p=>`
+       <div class="item"><div class="em">${isRecv?'📥':'📤'}</div>
+       <div class="mid"><div class="t">${esc(p.name||'—')}</div>
+       <div class="s">${p.detail?esc(p.detail)+' · ':''}${fmtDate(p.date)}</div></div>
+       <div style="text-align:right"><div class="amt ${isRecv?'pos':'neg'}">${fmt(p.amount,p.currency)}</div>
+       <div class="row" style="gap:8px;justify-content:flex-end">
+         <button class="del" style="color:var(--green)" onclick="settlePR('${p.id}')">Settle</button>
+         <button class="del" style="color:var(--accent)" onclick="editPR('${p.id}')">Edit</button>
+         <button class="del" onclick="delPR('${p.id}')">Del</button></div></div></div>`).join('')
+       : `<div class="empty">${isRecv?'No one owes you yet.':'You owe nothing yet.'}</div>`}
+   </div>
+   <button class="btn" onclick="openPR('${type}')">+ Add ${isRecv?'receivable':'payable'}</button>
   `);
 }
 function setPR(t){ prType=t; document.getElementById('pr-recv').classList.toggle('on',t==='receivable'); document.getElementById('pr-pay').classList.toggle('on',t==='payable'); }
@@ -872,9 +907,10 @@ function openBreakdown(){
    ${row('🇯🇴 Jordan account',t.jordanQAR, fmt(S.accounts.jordan,'JOD'),"openAccount('jordan')")}
    ${row('🪙 Gold (21k)',t.goldQAR, t.grams.toLocaleString('en',{maximumFractionDigits:2})+' g',"openGold()")}
    ${row('🚗 Cars receivable',t.carsRecvQAR, S.cars.filter(c=>c.status==='receivable').length+' pending',"openCars()")}
-   ${row('📥 Owed to me',t.receivables,'',"closeSheet();render()")}
+   ${row('📥 Owed to me',t.receivables,'',"openKashf('receivable')")}
    <div class="kv" style="border-top:2px solid var(--line);margin-top:4px"><span style="font-weight:800">Total assets</span><span style="font-weight:800;color:var(--green)">${fmt(t.assets,'QAR')}</span></div>
-   ${row('📤 You owe (liabilities)',-t.liabilities)}
+   ${row('📤 You owe / payable',-t.liabilities,'',"openKashf('payable')")}
+   <div class="kv"><span>⚖️ Net owed (receivable − payable)</span><span style="color:${t.prNet>=0?'var(--green)':'var(--red)'}">${t.prNet>=0?'+':'−'}${fmt(Math.abs(t.prNet),'QAR')}</span></div>
    <div class="kv" style="border-top:2px solid var(--line);margin-top:4px"><span style="font-weight:800">Net worth</span><span style="font-weight:800">${fmt(t.net,'QAR')}</span></div>
    <button class="btn ghost" onclick="closeSheet()">Close</button>
   `);
