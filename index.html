@@ -1,0 +1,758 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0e1a2b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>My Money</title>
+<style>
+  :root{
+    --bg:#0e1a2b; --bg2:#13233a; --card:#182c47; --card2:#1e3454;
+    --line:#284066; --text:#eaf1fb; --muted:#8aa0c0; --dim:#5f77a0;
+    --accent:#3b82f6; --accent2:#2563eb; --green:#22c55e; --red:#ef4444;
+    --gold:#e0b64a; --amber:#f59e0b; --radius:18px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:var(--bg);color:var(--text);
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:520px;margin:0 auto;padding:14px 14px 120px}
+  h1,h2,h3,h4{margin:0}
+  button{font-family:inherit;cursor:pointer;border:none}
+  .muted{color:var(--muted)} .dim{color:var(--dim)}
+  .row{display:flex;align-items:center;gap:10px}
+  .between{display:flex;align-items:center;justify-content:space-between;gap:10px}
+
+  /* Header / net worth */
+  .hero{
+    background:linear-gradient(160deg,#1c3a63,#132744);
+    border:1px solid var(--line);border-radius:24px;padding:20px;margin-bottom:14px;
+    box-shadow:0 10px 30px rgba(0,0,0,.35);
+  }
+  .hero .lbl{font-size:13px;color:var(--muted);letter-spacing:.3px}
+  .hero .net{font-size:38px;font-weight:800;letter-spacing:-1px;margin-top:2px}
+  .hero .net small{font-size:18px;font-weight:700;color:var(--muted);margin-left:4px}
+  .rateline{font-size:11px;color:var(--dim);margin-top:8px;display:flex;gap:12px;flex-wrap:wrap}
+  .rateline b{color:var(--muted);font-weight:600}
+
+  /* Account cards */
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
+  .acard{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px;position:relative;overflow:hidden}
+  .acard .ic{font-size:20px}
+  .acard .nm{font-size:13px;color:var(--muted);margin-top:6px}
+  .acard .bal{font-size:19px;font-weight:800;margin-top:2px;letter-spacing:-.3px}
+  .acard .sub{font-size:11px;color:var(--dim);margin-top:2px}
+  .acard.gold{background:linear-gradient(160deg,#3a2f16,#241d0e);border-color:#5c4a1e}
+  .acard.gold .nm,.acard.gold .sub{color:#c9b072}
+  .pl{font-size:12px;font-weight:700;margin-top:4px}
+  .pl.up{color:var(--green)} .pl.down{color:var(--red)}
+  .tap{cursor:pointer;transition:transform .08s} .tap:active{transform:scale(.97)}
+
+  /* Actions */
+  .actions{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:18px}
+  .act{background:var(--card2);border:1px solid var(--line);border-radius:16px;padding:12px 4px;color:var(--text);display:flex;flex-direction:column;align-items:center;gap:6px;font-size:11px;font-weight:600}
+  .act .em{font-size:20px}
+  .act:active{background:#26426b}
+
+  /* Section */
+  .sec{display:flex;align-items:center;justify-content:space-between;margin:16px 2px 8px}
+  .sec h3{font-size:15px;font-weight:700}
+  .sec a{font-size:12px;color:var(--accent);text-decoration:none}
+
+  /* List items */
+  .list{display:flex;flex-direction:column;gap:8px}
+  .item{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;display:flex;align-items:center;gap:12px}
+  .item .em{width:36px;height:36px;border-radius:11px;background:var(--card2);display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
+  .item .mid{flex:1;min-width:0}
+  .item .t{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item .s{font-size:11px;color:var(--muted);margin-top:2px}
+  .item .amt{font-size:15px;font-weight:800;white-space:nowrap}
+  .amt.pos{color:var(--green)} .amt.neg{color:var(--red)}
+  .badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:var(--card2);color:var(--muted);margin-left:6px}
+  .badge.recv{background:#3a2c12;color:var(--amber)}
+  .badge.paid{background:#12321f;color:var(--green)}
+  .badge.qa{background:#3a1717;color:#f19a9a}
+  .badge.uae{background:#0f2f2a;color:#66d9c0}
+  .empty{color:var(--dim);font-size:13px;text-align:center;padding:22px}
+
+  /* Modal / sheet */
+  .scrim{position:fixed;inset:0;background:rgba(4,9,18,.66);backdrop-filter:blur(3px);z-index:40;display:none;align-items:flex-end;justify-content:center}
+  .scrim.open{display:flex}
+  .sheet{background:var(--bg2);width:100%;max-width:520px;border-radius:26px 26px 0 0;border:1px solid var(--line);border-bottom:none;padding:8px 16px calc(20px + env(safe-area-inset-bottom));max-height:92vh;overflow-y:auto;animation:up .22s ease}
+  @keyframes up{from{transform:translateY(100%)}to{transform:translateY(0)}}
+  .grab{width:40px;height:4px;background:var(--line);border-radius:3px;margin:8px auto 12px}
+  .sheet h2{font-size:19px;margin-bottom:14px}
+  label.f{display:block;font-size:12px;color:var(--muted);margin:12px 0 6px;font-weight:600}
+  input,select,textarea{width:100%;background:var(--card);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:13px 12px;font-size:16px;outline:none}
+  input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+  select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%238aa0c0' stroke-width='1.6' fill='none' stroke-linecap='round'/></svg>");background-repeat:no-repeat;background-position:right 14px center;padding-right:34px}
+  .seg{display:flex;gap:8px}
+  .seg button{flex:1;background:var(--card);border:1px solid var(--line);color:var(--muted);border-radius:12px;padding:12px;font-size:14px;font-weight:700}
+  .seg button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .seg.g button.on{background:var(--gold);border-color:var(--gold);color:#241d0e}
+  .amtrow{display:flex;gap:8px}
+  .amtrow input{flex:2} .amtrow select{flex:1;min-width:96px}
+  .btn{width:100%;background:var(--accent);color:#fff;border-radius:14px;padding:15px;font-size:16px;font-weight:800;margin-top:18px}
+  .btn:active{background:var(--accent2)}
+  .btn.gold{background:var(--gold);color:#241d0e}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--text)}
+  .btn.red{background:var(--red)}
+  .hide{display:none!important}
+  .hint{font-size:11px;color:var(--dim);margin-top:6px;line-height:1.4}
+  .kv{display:flex;justify-content:space-between;font-size:13px;padding:9px 0;border-bottom:1px solid var(--line)}
+  .kv:last-child{border:none} .kv span:last-child{font-weight:700}
+  .del{color:var(--red);background:transparent;font-size:13px;font-weight:700;padding:6px 0}
+  .chiprow{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;margin-bottom:4px}
+  .chip{white-space:nowrap;background:var(--card);border:1px solid var(--line);color:var(--muted);border-radius:20px;padding:7px 13px;font-size:12px;font-weight:600}
+  .chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .toast{position:fixed;bottom:calc(20px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:#0b1626;border:1px solid var(--line);color:var(--text);padding:12px 18px;border-radius:14px;font-size:14px;z-index:60;box-shadow:0 8px 24px rgba(0,0,0,.4);opacity:0;transition:opacity .2s;pointer-events:none}
+  .toast.show{opacity:1}
+  .goldrow{display:flex;gap:8px;align-items:flex-end}
+  .goldrow>div{flex:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- NET WORTH -->
+  <div class="hero">
+    <div class="between">
+      <div class="lbl">Total net worth</div>
+      <button onclick="openSettings()" style="background:transparent;color:var(--muted);font-size:18px">⚙︎</button>
+    </div>
+    <div class="net" id="netWorth">QAR 0<small></small></div>
+    <div class="rateline" id="rateLine"></div>
+  </div>
+
+  <!-- ACCOUNT CARDS -->
+  <div class="cards" id="cards"></div>
+
+  <!-- ACTIONS -->
+  <div class="actions">
+    <button class="act" onclick="openRevenue()"><span class="em">💰</span>Revenue</button>
+    <button class="act" onclick="openExpense()"><span class="em">🧾</span>Expense</button>
+    <button class="act" onclick="openSalary()"><span class="em">💼</span>Salary</button>
+    <button class="act" onclick="openPR()"><span class="em">🤝</span>Owe / Owed</button>
+  </div>
+
+  <!-- CARS -->
+  <div class="sec"><h3>🚗 Cars</h3><a onclick="openCarAdd()">+ Add car</a></div>
+  <div class="list" id="carsList"></div>
+
+  <!-- PAYABLE / RECEIVABLE -->
+  <div class="sec"><h3>🤝 Payable / Receivable</h3></div>
+  <div class="list" id="prList"></div>
+
+  <!-- HISTORY -->
+  <div class="sec"><h3>🕑 Recent activity</h3><a onclick="openHistory()">See all</a></div>
+  <div class="list" id="histList"></div>
+</div>
+
+<!-- ============ SHEET ============ -->
+<div class="scrim" id="scrim" onclick="if(event.target===this)closeSheet()">
+  <div class="sheet" id="sheet"><div class="grab"></div><div id="sheetBody"></div></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ---------------- STATE ---------------- */
+const LS='myMoney_v1';
+const DEFAULT={
+  settings:{ rateJODtoQAR:5.13, rateAEDtoQAR:0.9942, rateUSDtoQAR:3.64,
+             gold21kJOD:47, goldUpdated:null, fxUpdated:null, liraGrams:8 },
+  accounts:{ main:0, jordan:0 },      // main=QAR, jordan=JOD
+  gold:[], cars:[], pr:[], txns:[], salary:null
+};
+function clone(o){ return JSON.parse(JSON.stringify(o)); }   // works on every browser (structuredClone is too new for some phones)
+/* robust number parse: accepts Arabic-Indic ٠-٩ / Persian ۰-۹ digits, commas, spaces */
+function num(v){
+  if(v==null) return NaN;
+  let s=(''+v).trim();
+  s=s.replace(/[٠-٩]/g,d=>d.charCodeAt(0)-0x0660)   // Arabic-Indic
+     .replace(/[۰-۹]/g,d=>d.charCodeAt(0)-0x06F0)   // Persian
+     .replace(/٫/g,'.').replace(/[,٬\s]/g,'');       // Arabic decimal/thousands sep
+  s=s.replace(/[^0-9.\-]/g,'');
+  return parseFloat(s);
+}
+let S = load();
+function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)); if(d){ return {...clone(DEFAULT),...d, settings:{...DEFAULT.settings,...(d.settings||{})}, accounts:{...DEFAULT.accounts,...(d.accounts||{})}}; } }catch(e){} return clone(DEFAULT); }
+function save(){ localStorage.setItem(LS, JSON.stringify(S)); render(); }
+function uid(){ return 'i'+Math.random().toString(36).slice(2,9); }
+
+/* ---------------- MONEY HELPERS ---------------- */
+const R=()=>({QAR:1, JOD:S.settings.rateJODtoQAR, AED:S.settings.rateAEDtoQAR, USD:S.settings.rateUSDtoQAR});
+function toQAR(a,c){ return a*(R()[c]||1); }
+function fromQAR(q,c){ return q/(R()[c]||1); }
+function fmt(n,cur='QAR',dec=0){ const v=(n<0?'-':'')+cur+' '+Math.abs(n).toLocaleString('en',{minimumFractionDigits:dec,maximumFractionDigits:dec}); return v; }
+function goldValueQAR(grams){ return toQAR(grams*S.settings.gold21kJOD,'JOD'); }
+
+function totals(){
+  const mainQAR=S.accounts.main;
+  const jordanQAR=toQAR(S.accounts.jordan,'JOD');
+  const grams=S.gold.reduce((s,g)=>s+g.grams,0);
+  const goldQAR=goldValueQAR(grams);
+  const carsRecvQAR=S.cars.filter(c=>c.status==='receivable').reduce((s,c)=>s+toQAR(c.amount,c.currency),0);
+  const prNet=S.pr.reduce((s,p)=>s+ (p.type==='receivable'? toQAR(p.amount,p.currency): -toQAR(p.amount,p.currency)),0);
+  const net=mainQAR+jordanQAR+goldQAR+carsRecvQAR+prNet;
+  return {mainQAR,jordanQAR,grams,goldQAR,carsRecvQAR,prNet,net};
+}
+
+/* ---------------- RENDER ---------------- */
+function render(){
+  const t=totals();
+  document.getElementById('netWorth').innerHTML = 'QAR '+Math.round(t.net).toLocaleString('en');
+
+  document.getElementById('rateLine').innerHTML =
+    `<span><b>1 JOD</b> = ${S.settings.rateJODtoQAR.toFixed(2)} QAR</span>`+
+    `<span><b>21k gold</b> ${S.settings.gold21kJOD} JOD/g</span>`+
+    (S.settings.goldUpdated?`<span>upd ${timeAgo(S.settings.goldUpdated)}</span>`:'');
+
+  // account cards
+  const grams=t.grams;
+  const goldPL = t.goldQAR - S.gold.reduce((s,g)=>s+toQAR(g.buyJOD,'JOD'),0);
+  document.getElementById('cards').innerHTML=`
+    <div class="acard tap" onclick="openAccount('main')">
+      <div class="ic">🏦</div><div class="nm">Main account</div>
+      <div class="bal">${fmt(S.accounts.main,'QAR')}</div><div class="sub">Qatar · QAR</div>
+    </div>
+    <div class="acard tap" onclick="openAccount('jordan')">
+      <div class="ic">🇯🇴</div><div class="nm">Jordan account</div>
+      <div class="bal">${fmt(S.accounts.jordan,'JOD')}</div><div class="sub">≈ ${fmt(t.jordanQAR,'QAR')}</div>
+    </div>
+    <div class="acard gold tap" onclick="openGold()">
+      <div class="ic">🪙</div><div class="nm">Gold (21k)</div>
+      <div class="bal">${fmt(t.goldQAR,'QAR')}</div>
+      <div class="sub">${grams.toLocaleString('en',{maximumFractionDigits:2})} g</div>
+      ${grams>0?`<div class="pl ${goldPL>=0?'up':'down'}">${goldPL>=0?'▲':'▼'} ${fmt(Math.abs(goldPL),'QAR')}</div>`:''}
+    </div>
+    <div class="acard tap" onclick="openCars()">
+      <div class="ic">🚗</div><div class="nm">Cars receivable</div>
+      <div class="bal">${fmt(t.carsRecvQAR,'QAR')}</div>
+      <div class="sub">${S.cars.filter(c=>c.status==='receivable').length} pending</div>
+    </div>`;
+
+  // cars list
+  const cars=[...S.cars].sort((a,b)=>(a.status>b.status?1:-1));
+  document.getElementById('carsList').innerHTML = cars.length? cars.map(c=>`
+    <div class="item">
+      <div class="em">🚗</div>
+      <div class="mid">
+        <div class="t">${esc(c.detail||'Car')} <span class="badge ${c.country==='UAE'?'uae':'qa'}">${c.country}</span></div>
+        <div class="s">${c.status==='receivable'?'Receivable':'Paid → '+accName(c.account)} · ${fmtDate(c.date)}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="amt ${c.status==='paid'?'pos':''}">${fmt(c.amount,c.currency)}</div>
+        ${c.status==='receivable'?`<button class="del" style="color:var(--green)" onclick="markPaid('${c.id}')">Mark paid →</button>`:`<span class="badge paid">PAID</span>`}
+      </div>
+    </div>`).join('') : `<div class="empty">No cars yet. Add one or log a car revenue.</div>`;
+
+  // payable/receivable
+  document.getElementById('prList').innerHTML = S.pr.length? S.pr.map(p=>`
+    <div class="item">
+      <div class="em">${p.type==='receivable'?'📥':'📤'}</div>
+      <div class="mid"><div class="t">${esc(p.name||'—')}</div>
+      <div class="s">${p.type==='receivable'?'Owed to me':'I owe'} · ${esc(p.detail||'')} · ${fmtDate(p.date)}</div></div>
+      <div style="text-align:right">
+        <div class="amt ${p.type==='receivable'?'pos':'neg'}">${p.type==='receivable'?'+':'−'}${fmt(p.amount,p.currency)}</div>
+        <button class="del" style="color:var(--green)" onclick="settlePR('${p.id}')">Settle →</button>
+      </div>
+    </div>`).join('') : `<div class="empty">Nothing owed either way.</div>`;
+
+  // history
+  const recent=[...S.txns].reverse().slice(0,6);
+  document.getElementById('histList').innerHTML = recent.length? recent.map(txRow).join('') : `<div class="empty">No activity yet.</div>`;
+}
+function txRow(x){
+  const pos = x.dir>0;
+  return `<div class="item">
+    <div class="em">${x.emoji}</div>
+    <div class="mid"><div class="t">${esc(x.title)}</div><div class="s">${esc(x.sub||'')} · ${fmtDate(x.date)}</div></div>
+    <div class="amt ${pos?'pos':'neg'}">${pos?'+':'−'}${fmt(x.amount,x.currency)}</div>
+  </div>`;
+}
+
+/* ---------------- UTIL ---------------- */
+function esc(s){return (s||'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));}
+function accName(a){return a==='main'?'Main':a==='jordan'?'Jordan':a;}
+function today(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function fmtDate(s){ if(!s)return''; const d=new Date(s+'T00:00:00'); return d.toLocaleDateString('en',{day:'numeric',month:'short'}); }
+function timeAgo(ts){ const m=Math.round((Date.now()-ts)/60000); if(m<60)return m+'m ago'; const h=Math.round(m/60); if(h<24)return h+'h ago'; return Math.round(h/24)+'d ago'; }
+function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1900); }
+
+/* ---------------- SHEET FRAMEWORK ---------------- */
+function openSheet(html){ document.getElementById('sheetBody').innerHTML=html; document.getElementById('scrim').classList.add('open'); }
+function closeSheet(){ document.getElementById('scrim').classList.remove('open'); }
+function accountOptions(sel){ return `<option value="main"${sel==='main'?' selected':''}>🏦 Main (QAR)</option><option value="jordan"${sel==='jordan'?' selected':''}>🇯🇴 Jordan (JOD)</option>`; }
+function curOptions(sel){ return ['QAR','JOD','AED','USD'].map(c=>`<option ${sel===c?'selected':''}>${c}</option>`).join(''); }
+function dateField(id){ return `<label class="f">Date</label><input type="date" id="${id}" value="${today()}">`; }
+
+/* deposit/withdraw to an account, converting into that account's own currency */
+function accCurrency(a){ return a==='jordan'?'JOD':'QAR'; }
+function deposit(acc, amount, cur){ const q=toQAR(amount,cur); S.accounts[acc]+= fromQAR(q, accCurrency(acc)); }
+function withdraw(acc, amount, cur){ const q=toQAR(amount,cur); S.accounts[acc]-= fromQAR(q, accCurrency(acc)); }
+
+/* ---------------- REVENUE ---------------- */
+let rev={cat:'income',recv:false,country:'Qatar'};
+function openRevenue(){
+  rev={cat:'income',recv:false,country:'Qatar'};
+  openSheet(`
+   <h2>💰 Add revenue</h2>
+   <label class="f">Category</label>
+   <div class="seg"><button id="rc-income" class="on" onclick="revCat('income')">Income</button><button id="rc-cars" onclick="revCat('cars')">Cars</button></div>
+
+   <div id="carsBlock" class="hide">
+     <label class="f">Is it receivable (not paid yet)?</label>
+     <div class="seg"><button id="rr-no" class="on" onclick="revRecv(false)">Paid now</button><button id="rr-yes" onclick="revRecv(true)">Receivable</button></div>
+     <label class="f">Country</label>
+     <div class="seg"><button id="rq-Qatar" class="on" onclick="revCountry('Qatar')">🇶🇦 Qatar</button><button id="rq-UAE" onclick="revCountry('UAE')">🇦🇪 UAE</button></div>
+   </div>
+
+   <label class="f">Amount</label>
+   <div class="amtrow"><input id="rvAmt" type="text" inputmode="decimal" placeholder="0.00"><select id="rvCur">${curOptions('QAR')}</select></div>
+
+   <div id="acctWrap"><label class="f">Deposit into account</label><select id="rvAcc">${accountOptions('main')}</select></div>
+
+   <label class="f">Detail</label><input id="rvDet" placeholder="e.g. Toyota Camry sale / consulting">
+   ${dateField('rvDate')}
+   <button class="btn" onclick="saveRevenue()">Save revenue</button>
+  `);
+}
+function revCat(c){ rev.cat=c; document.getElementById('rc-income').classList.toggle('on',c==='income'); document.getElementById('rc-cars').classList.toggle('on',c==='cars'); document.getElementById('carsBlock').classList.toggle('hide',c!=='cars'); syncAcctWrap(); }
+function revRecv(v){ rev.recv=v; document.getElementById('rr-yes').classList.toggle('on',v); document.getElementById('rr-no').classList.toggle('on',!v); syncAcctWrap(); }
+function revCountry(c){ rev.country=c; document.getElementById('rq-Qatar').classList.toggle('on',c==='Qatar'); document.getElementById('rq-UAE').classList.toggle('on',c==='UAE'); }
+function syncAcctWrap(){ const hide = rev.cat==='cars' && rev.recv; document.getElementById('acctWrap').classList.toggle('hide',hide); }
+function saveRevenue(){
+  const amount=num(document.getElementById('rvAmt').value);
+  const cur=document.getElementById('rvCur').value;
+  const det=document.getElementById('rvDet').value.trim();
+  const date=document.getElementById('rvDate').value||today();
+  if(!amount||amount<=0)return toast('Enter an amount');
+
+  if(rev.cat==='cars'){
+    if(rev.recv){
+      S.cars.push({id:uid(),amount,currency:cur,country:rev.country,status:'receivable',detail:det,date});
+      log('💰',(det||'Car')+' (receivable)','Cars · '+rev.country,amount,cur,0,date);
+    }else{
+      const acc=document.getElementById('rvAcc').value;
+      deposit(acc,amount,cur);
+      S.cars.push({id:uid(),amount,currency:cur,country:rev.country,status:'paid',account:acc,detail:det,date});
+      log('💰',(det||'Car')+' sold','Cars · '+rev.country+' → '+accName(acc),amount,cur,1,date);
+    }
+  }else{
+    const acc=document.getElementById('rvAcc').value;
+    deposit(acc,amount,cur);
+    log('💰',det||'Income','Income → '+accName(acc),amount,cur,1,date);
+  }
+  save(); closeSheet(); toast('Revenue saved');
+}
+
+/* ---------------- EXPENSE ---------------- */
+function openExpense(){
+  openSheet(`
+   <h2>🧾 Add expense</h2>
+   <label class="f">Amount</label>
+   <div class="amtrow"><input id="exAmt" type="text" inputmode="decimal" placeholder="0.00"><select id="exCur">${curOptions('QAR')}</select></div>
+   <label class="f">From account</label><select id="exAcc">${accountOptions('main')}</select>
+   <label class="f">Category</label>
+   <select id="exCat"><option>General</option><option>Food</option><option>Transport</option><option>Bills</option><option>Shopping</option><option>Rent</option><option>Car costs</option><option>Other</option></select>
+   <label class="f">Detail</label><input id="exDet" placeholder="optional note">
+   ${dateField('exDate')}
+   <button class="btn red" onclick="saveExpense()">Save expense</button>
+  `);
+}
+function saveExpense(){
+  const amount=num(document.getElementById('exAmt').value);
+  const cur=document.getElementById('exCur').value;
+  const acc=document.getElementById('exAcc').value;
+  const cat=document.getElementById('exCat').value;
+  const det=document.getElementById('exDet').value.trim();
+  const date=document.getElementById('exDate').value||today();
+  if(!amount||amount<=0)return toast('Enter an amount');
+  withdraw(acc,amount,cur);
+  log('🧾',det||cat,cat+' · '+accName(acc),amount,cur,-1,date);
+  save(); closeSheet(); toast('Expense saved');
+}
+
+/* ---------------- SALARY (automatic monthly) ---------------- */
+function curMonth(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+function dayOfMonth(){ return new Date().getDate(); }
+function openSalary(){
+  const s=S.salary;
+  const paidThis = s && s.lastPaid===curMonth();
+  openSheet(`
+   <h2>💼 Salary</h2>
+   ${s?`<div class="item" style="margin-bottom:6px"><div class="em">💼</div><div class="mid">
+      <div class="t">${fmt(s.amount,s.currency)} / month</div>
+      <div class="s">Into ${accName(s.account)} · on day ${s.day} · ${paidThis?'✓ added this month':'pending this month'}</div></div>
+      <button class="del" onclick="removeSalary()">Remove</button></div>
+      ${!paidThis?`<button class="btn" onclick="paySalaryNow()">Add this month now</button>`:''}
+      <p class="hint">Runs automatically: each month on/after day ${s.day}, when you open the app, the salary is added to ${accName(s.account)} once.</p>
+      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">`:''}
+   <label class="f">${s?'Update':'Set'} monthly salary</label>
+   <div class="amtrow"><input id="slAmt" type="text" inputmode="decimal" placeholder="0.00" value="${s?s.amount:''}"><select id="slCur">${curOptions(s?s.currency:'QAR')}</select></div>
+   <label class="f">Into account</label><select id="slAcc">${accountOptions(s?s.account:'main')}</select>
+   <label class="f">Paid on day of month</label>
+   <input id="slDay" type="text" inputmode="numeric" min="1" max="28" value="${s?s.day:1}">
+   <label class="f">Detail</label><input id="slDet" placeholder="e.g. Company monthly salary" value="${s?esc(s.detail||''):''}">
+   <button class="btn" onclick="saveSalary()">💼 Save automatic salary</button>
+   <button class="btn ghost" onclick="addSalaryOnce()">Add a one-off salary instead</button>
+  `);
+}
+function saveSalary(){
+  const amount=num(document.getElementById('slAmt').value);
+  const cur=document.getElementById('slCur').value;
+  const acc=document.getElementById('slAcc').value;
+  let day=Math.round(num(document.getElementById('slDay').value))||1; day=Math.min(28,Math.max(1,day));
+  const det=document.getElementById('slDet').value.trim();
+  if(!amount||amount<=0)return toast('Enter an amount');
+  const wasPaid = S.salary && S.salary.lastPaid;   // keep paid history so re-saving doesn't double-pay
+  S.salary={amount,currency:cur,account:acc,day,detail:det,lastPaid: (S.salary&&S.salary.lastPaid)||null};
+  save(); runAutoSalary(); closeSheet();
+  toast('Automatic salary set');
+}
+function paySalaryNow(){ if(runAutoSalary(true)){ closeSheet(); toast('Salary added'); } }
+function removeSalary(){ S.salary=null; save(); closeSheet(); toast('Removed'); }
+function addSalaryOnce(){
+  const amount=num(document.getElementById('slAmt').value);
+  const cur=document.getElementById('slCur').value;
+  const acc=document.getElementById('slAcc').value;
+  const det=document.getElementById('slDet').value.trim();
+  if(!amount||amount<=0)return toast('Enter an amount');
+  deposit(acc,amount,cur);
+  log('💼',det||'Salary','Salary → '+accName(acc),amount,cur,1,today());
+  save(); closeSheet(); toast('Salary added once');
+}
+/* auto-add salary for the current month if due and not yet paid. force=ignore the day check. */
+function runAutoSalary(force){
+  const s=S.salary; if(!s)return false;
+  if(s.lastPaid===curMonth())return false;                 // already paid this month
+  if(!force && dayOfMonth()<s.day)return false;            // not yet reached pay day
+  deposit(s.account,s.amount,s.currency);
+  s.lastPaid=curMonth();
+  const d=curMonth()+'-'+String(s.day).padStart(2,'0');
+  log('💼',s.detail||'Salary (auto)','Monthly salary → '+accName(s.account),s.amount,s.currency,1,d);
+  save(); return true;
+}
+
+/* ---------------- PAYABLE / RECEIVABLE ---------------- */
+let prType='receivable';
+function openPR(){
+  prType='receivable';
+  openSheet(`
+   <h2>🤝 Payable / Receivable</h2>
+   <label class="f">Type</label>
+   <div class="seg"><button id="pr-recv" class="on" onclick="setPR('receivable')">📥 Owed to me</button><button id="pr-pay" onclick="setPR('payable')">📤 I owe</button></div>
+   <label class="f">Person / name</label><input id="prName" placeholder="e.g. Ahmed">
+   <label class="f">Amount</label>
+   <div class="amtrow"><input id="prAmt" type="text" inputmode="decimal" placeholder="0.00"><select id="prCur">${curOptions('QAR')}</select></div>
+   <label class="f">Detail</label><input id="prDet" placeholder="optional note">
+   ${dateField('prDate')}
+   <button class="btn" onclick="savePR()">Save</button>
+   <p class="hint">This tracks debts only. When settled you'll be asked which account the money moves to/from.</p>
+  `);
+}
+function setPR(t){ prType=t; document.getElementById('pr-recv').classList.toggle('on',t==='receivable'); document.getElementById('pr-pay').classList.toggle('on',t==='payable'); }
+function savePR(){
+  const name=document.getElementById('prName').value.trim();
+  const amount=num(document.getElementById('prAmt').value);
+  const cur=document.getElementById('prCur').value;
+  const det=document.getElementById('prDet').value.trim();
+  const date=document.getElementById('prDate').value||today();
+  if(!amount||amount<=0)return toast('Enter an amount');
+  S.pr.push({id:uid(),type:prType,name,amount,currency:cur,detail:det,date});
+  save(); closeSheet(); toast('Saved');
+}
+function settlePR(id){
+  const p=S.pr.find(x=>x.id===id); if(!p)return;
+  openSheet(`
+   <h2>Settle ${p.type==='receivable'?'money owed to you':'money you owe'}</h2>
+   <div class="kv"><span>${esc(p.name||'—')}</span><span>${fmt(p.amount,p.currency)}</span></div>
+   <label class="f">${p.type==='receivable'?'Receive into which account?':'Pay from which account?'}</label>
+   <select id="prAcc">${accountOptions('main')}</select>
+   <button class="btn" onclick="doSettlePR('${id}')">Confirm settle</button>
+   <button class="btn ghost" onclick="render();delPR('${id}')">Delete without moving money</button>
+  `);
+}
+function doSettlePR(id){
+  const p=S.pr.find(x=>x.id===id); if(!p)return;
+  const acc=document.getElementById('prAcc').value;
+  if(p.type==='receivable') deposit(acc,p.amount,p.currency); else withdraw(acc,p.amount,p.currency);
+  log(p.type==='receivable'?'📥':'📤', (p.name||'')+' settled', 'Settled '+(p.type==='receivable'?'→ ':'from ')+accName(acc), p.amount, p.currency, p.type==='receivable'?1:-1, today());
+  S.pr=S.pr.filter(x=>x.id!==id);
+  save(); closeSheet(); toast('Settled');
+}
+function delPR(id){ S.pr=S.pr.filter(x=>x.id!==id); save(); closeSheet(); }
+
+/* ---------------- CARS ---------------- */
+function openCarAdd(){
+  openSheet(`
+   <h2>🚗 Add car (receivable)</h2>
+   <label class="f">Country</label>
+   <div class="seg"><button id="cq-Qatar" class="on" onclick="carC('Qatar')">🇶🇦 Qatar</button><button id="cq-UAE" onclick="carC('UAE')">🇦🇪 UAE</button></div>
+   <label class="f">Amount</label>
+   <div class="amtrow"><input id="carAmt" type="text" inputmode="decimal" placeholder="0.00"><select id="carCur">${curOptions('QAR')}</select></div>
+   <label class="f">Detail</label><input id="carDet" placeholder="e.g. Nissan Patrol 2019">
+   ${dateField('carDate')}
+   <button class="btn" onclick="saveCar()">Save as receivable</button>
+  `);
+  window._carC='Qatar';
+}
+function carC(c){ window._carC=c; document.getElementById('cq-Qatar').classList.toggle('on',c==='Qatar'); document.getElementById('cq-UAE').classList.toggle('on',c==='UAE'); }
+function saveCar(){
+  const amount=num(document.getElementById('carAmt').value);
+  const cur=document.getElementById('carCur').value;
+  const det=document.getElementById('carDet').value.trim();
+  const date=document.getElementById('carDate').value||today();
+  if(!amount||amount<=0)return toast('Enter an amount');
+  S.cars.push({id:uid(),amount,currency:cur,country:window._carC,status:'receivable',detail:det,date});
+  save(); closeSheet(); toast('Car added');
+}
+function markPaid(id){
+  const c=S.cars.find(x=>x.id===id); if(!c)return;
+  openSheet(`
+   <h2>Mark car as paid</h2>
+   <div class="kv"><span>${esc(c.detail||'Car')} · ${c.country}</span><span>${fmt(c.amount,c.currency)}</span></div>
+   <label class="f">Transfer the amount into which account?</label>
+   <select id="mpAcc">${accountOptions('main')}</select>
+   <p class="hint">The amount will be added to that account's balance.</p>
+   <button class="btn" onclick="doMarkPaid('${id}')">Confirm — money received</button>
+  `);
+}
+function doMarkPaid(id){
+  const c=S.cars.find(x=>x.id===id); if(!c)return;
+  const acc=document.getElementById('mpAcc').value;
+  deposit(acc,c.amount,c.currency);
+  c.status='paid'; c.account=acc;
+  log('🚗',(c.detail||'Car')+' paid','Cars · '+c.country+' → '+accName(acc),c.amount,c.currency,1,today());
+  save(); closeSheet(); toast('Transferred to '+accName(acc));
+}
+function openCars(){
+  const list=S.cars;
+  openSheet(`<h2>🚗 All cars</h2><div class="list">${list.length?list.map(c=>`
+    <div class="item"><div class="em">🚗</div><div class="mid">
+      <div class="t">${esc(c.detail||'Car')} <span class="badge ${c.country==='UAE'?'uae':'qa'}">${c.country}</span></div>
+      <div class="s">${c.status==='receivable'?'Receivable':'Paid → '+accName(c.account)} · ${fmtDate(c.date)}</div></div>
+      <div style="text-align:right"><div class="amt">${fmt(c.amount,c.currency)}</div>
+      ${c.status==='receivable'?`<button class="del" style="color:var(--green)" onclick="markPaid('${c.id}')">Mark paid →</button>`:`<button class="del" onclick="delCar('${c.id}')">Delete</button>`}</div>
+    </div>`).join(''):'<div class="empty">No cars.</div>'}</div>
+    <button class="btn ghost" onclick="openCarAdd()">+ Add car</button>`);
+}
+function delCar(id){ S.cars=S.cars.filter(x=>x.id!==id); save(); openCars(); }
+
+/* ---------------- GOLD ---------------- */
+function openGold(){
+  const grams=S.gold.reduce((s,g)=>s+g.grams,0);
+  const valQAR=goldValueQAR(grams);
+  const buyQAR=S.gold.reduce((s,g)=>s+toQAR(g.buyJOD,'JOD'),0);
+  const pl=valQAR-buyQAR;
+  openSheet(`
+   <h2>🪙 Gold (21k)</h2>
+   <div class="kv"><span>21k price (Jordan)</span><span>${S.settings.gold21kJOD} JOD/g</span></div>
+   <div class="kv"><span>Total holdings</span><span>${grams.toLocaleString('en',{maximumFractionDigits:2})} g${grams>0?' (≈ '+(grams/S.settings.liraGrams).toLocaleString('en',{maximumFractionDigits:1})+' liras)':''}</span></div>
+   <div class="kv"><span>Current value</span><span>${fmt(valQAR,'QAR')}</span></div>
+   <div class="kv"><span>Total invested</span><span>${fmt(buyQAR,'QAR')}</span></div>
+   <div class="kv"><span>Profit / loss</span><span style="color:${pl>=0?'var(--green)':'var(--red)'}">${pl>=0?'+':'−'}${fmt(Math.abs(pl),'QAR')}</span></div>
+
+   <div style="display:flex;gap:8px;margin-top:14px">
+     <button class="btn gold" style="margin:0" onclick="refreshGold()">↻ Refresh price</button>
+     <button class="btn ghost" style="margin:0" onclick="editGoldPrice()">Set 21k price</button>
+   </div>
+
+   <label class="f" style="margin-top:20px">Add a purchase</label>
+   <div class="seg g"><button id="gu-g" class="on" onclick="goldUnit('g')">By grams</button><button id="gu-l" onclick="goldUnit('l')">By liras (1 = ${S.settings.liraGrams}g)</button></div>
+   <div class="goldrow" style="margin-top:10px">
+     <div><span class="dim" style="font-size:11px" id="gUnitLbl">Grams</span><input id="gQty" type="text" inputmode="decimal" placeholder="e.g. 25" oninput="goldPreview()"></div>
+     <div><span class="dim" style="font-size:11px">Bought for (JOD total)</span><input id="gJOD" type="text" inputmode="decimal" placeholder="e.g. 1100"></div>
+   </div>
+   <div class="hint" id="gPreview"></div>
+   ${dateField('gDate')}
+   <button class="btn gold" onclick="addGold()">+ Add gold</button>
+
+   ${S.gold.length?`<label class="f" style="margin-top:18px">Your holdings</label><div class="list">${S.gold.map(g=>{
+     const cv=goldValueQAR(g.grams), bv=toQAR(g.buyJOD,'JOD'), d=cv-bv;
+     const title = g.liras? (g.liras+' lira'+(g.liras>1?'s':'')+' · '+g.grams+' g') : (g.grams+' g');
+     return `<div class="item"><div class="em">🪙</div><div class="mid">
+       <div class="t">${title}</div><div class="s">Bought ${g.buyJOD} JOD (${fmt(bv,'QAR')}) · ${fmtDate(g.date)}</div></div>
+       <div style="text-align:right"><div class="amt">${fmt(cv,'QAR')}</div>
+       <div class="pl ${d>=0?'up':'down'}" style="font-size:11px">${d>=0?'+':'−'}${fmt(Math.abs(d),'QAR')}</div>
+       <button class="del" onclick="delGold('${g.id}')">Delete</button></div></div>`;
+   }).join('')}</div>`:''}
+   <p class="hint">Auto-refresh uses a live gold rate when your phone allows it; otherwise set the exact 21k Jordan JOD/gram manually — that value is always used for calculations.</p>
+  `);
+}
+let _gu='g';
+function goldUnit(u){ _gu=u; document.getElementById('gu-g').classList.toggle('on',u==='g'); document.getElementById('gu-l').classList.toggle('on',u==='l'); document.getElementById('gUnitLbl').textContent = u==='l'?('Liras (×'+S.settings.liraGrams+'g)'):'Grams'; goldPreview(); }
+function goldPreview(){
+  const v=num(document.getElementById('gQty').value)||0;
+  const grams = _gu==='l'? v*S.settings.liraGrams : v;
+  const el=document.getElementById('gPreview');
+  el.textContent = grams>0 ? (_gu==='l'? (v+' liras = '+grams+' g'):(grams+' g')) + ' · current value ≈ '+fmt(goldValueQAR(grams),'QAR') : '';
+}
+function addGold(){
+  const v=num(document.getElementById('gQty').value);
+  const buyJOD=num(document.getElementById('gJOD').value);
+  const date=document.getElementById('gDate').value||today();
+  if(!v||v<=0)return toast(_gu==='l'?'Enter number of liras':'Enter grams');
+  if(!buyJOD||buyJOD<=0)return toast('Enter purchase price in JOD');
+  const liras = _gu==='l'? v : null;
+  const grams = _gu==='l'? v*S.settings.liraGrams : v;
+  S.gold.push({id:uid(),grams,liras,buyJOD,date});
+  _gu='g'; save(); openGold(); toast('Gold added');
+}
+function delGold(id){ S.gold=S.gold.filter(x=>x.id!==id); save(); openGold(); }
+function editGoldPrice(){
+  const v=prompt('Current 21k gold price in Jordan (JOD per gram):', S.settings.gold21kJOD);
+  if(v===null)return; const n=num(v); if(!n||n<=0)return toast('Invalid');
+  S.settings.gold21kJOD=n; S.settings.goldUpdated=Date.now(); save(); openGold(); toast('Price updated');
+}
+
+/* ---------------- LIVE RATES (best-effort, graceful fallback) ---------------- */
+async function refreshFX(){
+  try{
+    const r=await fetch('https://open.er-api.com/v6/latest/JOD');
+    const j=await r.json();
+    if(j&&j.rates){
+      if(j.rates.QAR){ S.settings.rateJODtoQAR=+j.rates.QAR.toFixed(4); }
+      if(j.rates.AED){ S.settings.rateAEDtoQAR=+(j.rates.QAR/j.rates.AED).toFixed(4); }
+      if(j.rates.USD){ S.settings.rateUSDtoQAR=+(j.rates.QAR/j.rates.USD).toFixed(4); }
+      S.settings.fxUpdated=Date.now(); save();
+    }
+  }catch(e){ /* offline / blocked — keep stored rates */ }
+}
+async function refreshGold(){
+  toast('Fetching gold price…');
+  // Try a keyless gold price source (troy ounce, 24k) then derive 21k JOD/gram.
+  try{
+    const r=await fetch('https://api.gold-api.com/price/XAU');
+    const j=await r.json();
+    if(j&&j.price){
+      // j.price = USD per troy ounce (24k). 21k = 21/24. 1 oz = 31.1035 g.
+      const usdPerG24=j.price/31.1035;
+      const usdPerG21=usdPerG24*(21/24);
+      const jodPerUSD=1/(S.settings.rateJODtoQAR/S.settings.rateUSDtoQAR); // QAR/USD ÷ QAR/JOD → JOD per USD
+      const jodPerG21=usdPerG21*jodPerUSD;
+      S.settings.gold21kJOD=+jodPerG21.toFixed(2);
+      S.settings.goldUpdated=Date.now(); save();
+      if(document.getElementById('scrim').classList.contains('open')) openGold();
+      return toast('Gold price updated');
+    }
+    throw 0;
+  }catch(e){
+    toast('Auto-fetch blocked — set price manually');
+    editGoldPrice();
+  }
+}
+
+/* ---------------- ACCOUNTS ---------------- */
+function openAccount(a){
+  const bal=S.accounts[a], cur=accCurrency(a);
+  openSheet(`
+   <h2>${a==='main'?'🏦 Main account':'🇯🇴 Jordan account'}</h2>
+   <div class="kv"><span>Balance</span><span>${fmt(bal,cur)}</span></div>
+   ${a==='jordan'?`<div class="kv"><span>In QAR</span><span>${fmt(toQAR(bal,'JOD'),'QAR')}</span></div>`:''}
+   <label class="f">Adjust balance / set opening amount</label>
+   <div class="amtrow"><input id="adjAmt" type="text" inputmode="decimal" placeholder="amount in ${cur}"><select id="adjMode"><option value="set">Set to</option><option value="add">Add</option><option value="sub">Subtract</option></select></div>
+   <button class="btn" onclick="adjAcc('${a}')">Apply</button>
+   <button class="btn ghost" onclick="transferOpen('${a}')">Transfer to other account</button>
+  `);
+}
+function adjAcc(a){
+  const v=num(document.getElementById('adjAmt').value); const mode=document.getElementById('adjMode').value;
+  if(isNaN(v))return toast('Enter amount');
+  if(mode==='set')S.accounts[a]=v; else if(mode==='add')S.accounts[a]+=v; else S.accounts[a]-=v;
+  save(); closeSheet(); toast('Updated');
+}
+function transferOpen(from){
+  const to= from==='main'?'jordan':'main';
+  openSheet(`
+   <h2>Transfer</h2>
+   <div class="kv"><span>From</span><span>${accName(from)} (${accCurrency(from)})</span></div>
+   <div class="kv"><span>To</span><span>${accName(to)} (${accCurrency(to)})</span></div>
+   <label class="f">Amount (in ${accCurrency(from)})</label>
+   <input id="trAmt" type="text" inputmode="decimal" placeholder="0.00">
+   <button class="btn" onclick="doTransfer('${from}','${to}')">Transfer</button>
+   <p class="hint">Converted automatically at 1 JOD = ${S.settings.rateJODtoQAR} QAR.</p>
+  `);
+}
+function doTransfer(from,to){
+  const v=num(document.getElementById('trAmt').value);
+  if(!v||v<=0)return toast('Enter amount');
+  withdraw(from,v,accCurrency(from)); deposit(to,v,accCurrency(from));
+  log('🔁','Transfer',accName(from)+' → '+accName(to),v,accCurrency(from),0,today());
+  save(); closeSheet(); toast('Transferred');
+}
+
+/* ---------------- HISTORY / LOG ---------------- */
+function log(emoji,title,sub,amount,currency,dir,date){ S.txns.push({id:uid(),emoji,title,sub,amount,currency,dir,date}); }
+function openHistory(){
+  const list=[...S.txns].reverse();
+  openSheet(`<h2>🕑 All activity</h2><div class="list">${list.length?list.map(x=>`
+    <div class="item"><div class="em">${x.emoji}</div><div class="mid"><div class="t">${esc(x.title)}</div>
+    <div class="s">${esc(x.sub||'')} · ${fmtDate(x.date)}</div></div>
+    <div style="text-align:right"><div class="amt ${x.dir>0?'pos':x.dir<0?'neg':''}">${x.dir>0?'+':x.dir<0?'−':''}${fmt(x.amount,x.currency)}</div>
+    <button class="del" onclick="delTxn('${x.id}')">Delete</button></div></div>`).join(''):'<div class="empty">No activity.</div>'}</div>`);
+}
+function delTxn(id){ S.txns=S.txns.filter(x=>x.id!==id); save(); openHistory(); }
+
+/* ---------------- SETTINGS ---------------- */
+function openSettings(){
+  openSheet(`
+   <h2>⚙︎ Settings</h2>
+   <label class="f">1 JOD = ? QAR</label><input id="stJOD" type="number" step="0.0001" value="${S.settings.rateJODtoQAR}">
+   <label class="f">1 AED = ? QAR</label><input id="stAED" type="number" step="0.0001" value="${S.settings.rateAEDtoQAR}">
+   <label class="f">1 USD = ? QAR</label><input id="stUSD" type="number" step="0.0001" value="${S.settings.rateUSDtoQAR}">
+   <label class="f">21k gold — Jordan (JOD / gram)</label><input id="stGold" type="number" step="0.01" value="${S.settings.gold21kJOD}">
+   <label class="f">1 gold lira = ? grams</label><input id="stLira" type="number" step="0.01" value="${S.settings.liraGrams}">
+   <button class="btn" onclick="saveSettings()">Save settings</button>
+   <div style="display:flex;gap:8px;margin-top:10px">
+     <button class="btn ghost" style="margin:0" onclick="refreshFX().then(()=>{openSettings();toast('Rates refreshed')})">↻ Live FX</button>
+     <button class="btn ghost" style="margin:0" onclick="exportData()">Export backup</button>
+   </div>
+   <label class="f" style="margin-top:14px">Restore from backup (paste JSON)</label>
+   <textarea id="impBox" rows="3" placeholder="paste exported data here"></textarea>
+   <button class="btn ghost" onclick="importData()">Restore</button>
+   <button class="btn red" onclick="wipe()">Erase all data</button>
+   <p class="hint">All data is stored only on this phone. Export regularly to keep a backup. Add to Home Screen for an app-like experience.</p>
+  `);
+}
+function saveSettings(){
+  S.settings.rateJODtoQAR=num(document.getElementById('stJOD').value)||S.settings.rateJODtoQAR;
+  S.settings.rateAEDtoQAR=num(document.getElementById('stAED').value)||S.settings.rateAEDtoQAR;
+  S.settings.rateUSDtoQAR=num(document.getElementById('stUSD').value)||S.settings.rateUSDtoQAR;
+  const g=num(document.getElementById('stGold').value); if(g>0){S.settings.gold21kJOD=g;S.settings.goldUpdated=Date.now();}
+  const lg=num(document.getElementById('stLira').value); if(lg>0){S.settings.liraGrams=lg;}
+  save(); closeSheet(); toast('Settings saved');
+}
+function exportData(){
+  const blob=JSON.stringify(S);
+  navigator.clipboard?.writeText(blob).then(()=>toast('Backup copied to clipboard')).catch(()=>{});
+  const a=document.createElement('a'); a.href='data:application/json,'+encodeURIComponent(blob);
+  a.download='my-money-backup-'+today()+'.json'; a.click();
+}
+function importData(){
+  try{ const d=JSON.parse(document.getElementById('impBox').value); S={...clone(DEFAULT),...d}; save(); closeSheet(); toast('Restored'); }
+  catch(e){ toast('Invalid backup'); }
+}
+function wipe(){ if(confirm('Erase ALL data? This cannot be undone.')){ S=clone(DEFAULT); save(); closeSheet(); toast('Erased'); } }
+
+/* ---------------- INIT ---------------- */
+runAutoSalary();          // add this month's salary automatically if due
+render();
+refreshFX();              // silent live FX on open
+// Auto gold refresh once per day
+(function(){ const last=S.settings.goldUpdated||0; if(Date.now()-last>20*60*60*1000){ /* attempt quietly */
+  fetch('https://api.gold-api.com/price/XAU').then(r=>r.json()).then(j=>{ if(j&&j.price){
+    const usdPerG21=(j.price/31.1035)*(21/24);
+    const jodPerUSD=S.settings.rateUSDtoQAR/S.settings.rateJODtoQAR;
+    S.settings.gold21kJOD=+(usdPerG21*jodPerUSD).toFixed(2); S.settings.goldUpdated=Date.now(); save();
+  }}).catch(()=>{});
+}})();
+</script>
+</body>
+</html>
