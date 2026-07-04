@@ -87,6 +87,8 @@
   .badge.qa{background:#3a1717;color:#f19a9a}
   .badge.uae{background:#0f2f2a;color:#66d9c0}
   .empty{color:var(--dim);font-size:13px;text-align:center;padding:22px}
+  .bkbanner{display:flex;align-items:center;gap:10px;background:#3a2c12;border:1px solid #5c4a1e;color:#f3d9a0;border-radius:14px;padding:11px 13px;margin-bottom:14px;font-size:13px}
+  .bkbanner button{margin-left:auto;background:var(--amber);color:#241d0e;font-weight:800;border-radius:10px;padding:8px 12px;font-size:12px;white-space:nowrap}
   .prsum{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px}
   .prcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px}
   .prcard .k{font-size:10px;color:var(--muted);font-weight:600}
@@ -145,6 +147,9 @@
     <div class="herostats tap" id="heroStats" onclick="openBreakdown()"></div>
     <div class="rateline" id="rateLine"></div>
   </div>
+
+  <!-- BACKUP REMINDER -->
+  <div id="backupBanner"></div>
 
   <!-- ACCOUNT CARDS -->
   <div class="cards" id="cards"></div>
@@ -228,6 +233,12 @@ function totals(){
 function render(){
   const t=totals();
   document.getElementById('netWorth').innerHTML = 'QAR '+Math.round(t.net).toLocaleString('en');
+
+  // backup reminder: show if there's real data and it's been >7 days (or never) since last backup
+  const hasData = S.txns.length||S.cars.length||S.pr.length||S.gold.length||S.accounts.main||S.accounts.jordan;
+  const lb=S.settings.lastBackup, days=lb?(Date.now()-lb)/86400000:Infinity;
+  document.getElementById('backupBanner').innerHTML = (hasData && days>7)
+    ? `<div class="bkbanner"><span>⚠️ ${lb?'Last backup '+timeAgo(lb)+'.':'You have no backup yet.'} Keep your data safe.</span><button onclick="openBackup()">Back up</button></div>` : '';
 
   document.getElementById('heroStats').innerHTML =
     `<div class="st"><div class="k">TOTAL ASSETS</div><div class="v a">${fmt(t.assets,'QAR')}</div></div>`+
@@ -926,15 +937,28 @@ function openSettings(){
    <label class="f">21k gold — Jordan (JOD / gram)</label><input id="stGold" type="number" step="0.01" value="${S.settings.gold21kJOD}">
    <label class="f">1 gold lira = ? grams</label><input id="stLira" type="number" step="0.01" value="${S.settings.liraGrams}">
    <button class="btn" onclick="saveSettings()">Save settings</button>
-   <div style="display:flex;gap:8px;margin-top:10px">
-     <button class="btn ghost" style="margin:0" onclick="refreshFX().then(()=>{openSettings();toast('Rates refreshed')})">↻ Live FX</button>
-     <button class="btn ghost" style="margin:0" onclick="exportData()">Export backup</button>
-   </div>
-   <label class="f" style="margin-top:14px">Restore from backup (paste JSON)</label>
+   <button class="btn ghost" onclick="refreshFX().then(()=>{openSettings();toast('Rates refreshed')})">↻ Refresh live FX</button>
+   <button class="btn ghost" onclick="openBackup()">💾 Backup &amp; restore</button>
+  `);
+}
+/* ---------------- BACKUP / RESTORE ---------------- */
+function openBackup(){
+  const lb=S.settings.lastBackup;
+  openSheet(`
+   <h2>💾 Backup &amp; restore</h2>
+   <div class="kv"><span>Last backup</span><span>${lb?timeAgo(lb):'never'}</span></div>
+   <p class="hint" style="margin-top:0">Your data lives only on this phone. Save a backup file to <b>iCloud Drive</b> (or email it to yourself) so you never lose it. Do this after adding important entries.</p>
+   <button class="btn" onclick="exportData()">📤 Save / share backup file</button>
+   <p class="hint">On iPhone: tap above → <b>Save to Files → iCloud Drive</b>, or send it to yourself on WhatsApp/Mail. The file also gets copied to your clipboard.</p>
+
+   <label class="f" style="margin-top:16px">Restore from a backup file</label>
+   <label class="btn ghost" style="display:block;text-align:center">📥 Choose backup file<input type="file" accept="application/json,.json,text/plain" onchange="importFile(this)" style="display:none"></label>
+   <label class="f" style="margin-top:10px">…or paste backup text</label>
    <textarea id="impBox" rows="3" placeholder="paste exported data here"></textarea>
-   <button class="btn ghost" onclick="importData()">Restore</button>
-   <button class="btn red" onclick="wipe()">Erase all data</button>
-   <p class="hint">All data is stored only on this phone. Export regularly to keep a backup. Add to Home Screen for an app-like experience.</p>
+   <button class="btn ghost" onclick="importData()">Restore from text</button>
+
+   <button class="btn red" style="margin-top:18px" onclick="wipe()">Erase all data</button>
+   <p class="hint">⚠️ Restoring replaces everything currently in the app with the backup's contents.</p>
   `);
 }
 function saveSettings(){
@@ -945,15 +969,33 @@ function saveSettings(){
   const lg=num(document.getElementById('stLira').value); if(lg>0){S.settings.liraGrams=lg;}
   save(); closeSheet(); toast('Settings saved');
 }
-function exportData(){
-  const blob=JSON.stringify(S);
-  navigator.clipboard?.writeText(blob).then(()=>toast('Backup copied to clipboard')).catch(()=>{});
-  const a=document.createElement('a'); a.href='data:application/json,'+encodeURIComponent(blob);
-  a.download='my-money-backup-'+today()+'.json'; a.click();
+async function exportData(){
+  const text=JSON.stringify(S);
+  const name='my-money-backup-'+today()+'.json';
+  navigator.clipboard?.writeText(text).catch(()=>{});          // also to clipboard as a fallback
+  const blob=new Blob([text],{type:'application/json'});
+  const file=new File([blob],name,{type:'application/json'});
+  // iOS/modern: open the share sheet so the user can Save to Files (iCloud) / Mail / WhatsApp
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try{ await navigator.share({files:[file],title:'My Money backup'}); markBackedUp(); return; }
+    catch(e){ if(e&&e.name==='AbortError')return; }
+  }
+  // fallback: download the file
+  const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+  markBackedUp(); toast('Backup file saved');
 }
+function markBackedUp(){ S.settings.lastBackup=Date.now(); save(); }
 function importData(){
-  try{ const d=JSON.parse(document.getElementById('impBox').value); S={...clone(DEFAULT),...d}; save(); closeSheet(); toast('Restored'); }
+  try{ const d=JSON.parse(document.getElementById('impBox').value); if(!d||typeof d!=='object')throw 0; S={...clone(DEFAULT),...d}; save(); closeSheet(); toast('Restored'); }
   catch(e){ toast('Invalid backup'); }
+}
+function importFile(input){
+  const f=input.files&&input.files[0]; if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{ try{ const d=JSON.parse(r.result); if(!d||typeof d!=='object')throw 0; S={...clone(DEFAULT),...d}; save(); closeSheet(); toast('Restored from file'); }catch(e){ toast('Invalid backup file'); } };
+  r.onerror=()=>toast('Could not read file');
+  r.readAsText(f);
 }
 function wipe(){ if(confirm('Erase ALL data? This cannot be undone.')){ S=clone(DEFAULT); save(); closeSheet(); toast('Erased'); } }
 
