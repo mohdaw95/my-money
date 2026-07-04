@@ -38,6 +38,12 @@
   .hero .lbl{font-size:13px;color:var(--muted);letter-spacing:.3px}
   .hero .net{font-size:38px;font-weight:800;letter-spacing:-1px;margin-top:2px}
   .hero .net small{font-size:18px;font-weight:700;color:var(--muted);margin-left:4px}
+  .herostats{display:flex;gap:10px;margin-top:12px}
+  .herostats .st{flex:1;background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:12px;padding:8px 10px}
+  .herostats .st .k{font-size:10px;color:var(--muted);font-weight:600}
+  .herostats .st .v{font-size:15px;font-weight:800;margin-top:1px}
+  .herostats .st .v.a{color:var(--green)} .herostats .st .v.l{color:var(--red)}
+  .herostats .more{font-size:9px;color:var(--dim);text-align:right;margin-top:2px}
   .rateline{font-size:11px;color:var(--dim);margin-top:8px;display:flex;gap:12px;flex-wrap:wrap}
   .rateline b{color:var(--muted);font-weight:600}
 
@@ -127,6 +133,7 @@
       <button onclick="openSettings()" style="background:transparent;color:var(--muted);font-size:18px">⚙︎</button>
     </div>
     <div class="net" id="netWorth">QAR 0<small></small></div>
+    <div class="herostats tap" id="heroStats" onclick="openBreakdown()"></div>
     <div class="rateline" id="rateLine"></div>
   </div>
 
@@ -198,15 +205,23 @@ function totals(){
   const grams=S.gold.reduce((s,g)=>s+g.grams,0);
   const goldQAR=goldValueQAR(grams);
   const carsRecvQAR=S.cars.filter(c=>c.status==='receivable').reduce((s,c)=>s+toQAR(c.amount,c.currency),0);
-  const prNet=S.pr.reduce((s,p)=>s+ (p.type==='receivable'? toQAR(p.amount,p.currency): -toQAR(p.amount,p.currency)),0);
-  const net=mainQAR+jordanQAR+goldQAR+carsRecvQAR+prNet;
-  return {mainQAR,jordanQAR,grams,goldQAR,carsRecvQAR,prNet,net};
+  const receivables=S.pr.filter(p=>p.type==='receivable').reduce((s,p)=>s+toQAR(p.amount,p.currency),0);
+  const payables=S.pr.filter(p=>p.type==='payable').reduce((s,p)=>s+toQAR(p.amount,p.currency),0);
+  const prNet=receivables-payables;
+  const assets=mainQAR+jordanQAR+goldQAR+carsRecvQAR+receivables;   // everything you own / are owed
+  const liabilities=payables;                                        // what you owe
+  const net=assets-liabilities;                                      // net worth
+  return {mainQAR,jordanQAR,grams,goldQAR,carsRecvQAR,receivables,payables,prNet,assets,liabilities,net};
 }
 
 /* ---------------- RENDER ---------------- */
 function render(){
   const t=totals();
   document.getElementById('netWorth').innerHTML = 'QAR '+Math.round(t.net).toLocaleString('en');
+
+  document.getElementById('heroStats').innerHTML =
+    `<div class="st"><div class="k">TOTAL ASSETS</div><div class="v a">${fmt(t.assets,'QAR')}</div></div>`+
+    `<div class="st"><div class="k">YOU OWE</div><div class="v l">${fmt(t.liabilities,'QAR')}</div><div class="more">tap for details ›</div></div>`;
 
   document.getElementById('rateLine').innerHTML =
     `<span><b>1 JOD</b> = ${S.settings.rateJODtoQAR.toFixed(2)} QAR</span>`+
@@ -249,6 +264,7 @@ function render(){
       <div style="text-align:right">
         <div class="amt ${c.status==='paid'?'pos':''}">${fmt(c.amount,c.currency)}</div>
         ${c.status==='receivable'?`<button class="del" style="color:var(--green)" onclick="markPaid('${c.id}')">Mark paid →</button>`:`<span class="badge paid">PAID</span>`}
+        <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editCar('${c.id}')">Edit</button><button class="del" onclick="delCar('${c.id}')">Delete</button></div>
       </div>
     </div>`).join('') : `<div class="empty">No cars yet. Add one or log a car revenue.</div>`;
 
@@ -261,6 +277,7 @@ function render(){
       <div style="text-align:right">
         <div class="amt ${p.type==='receivable'?'pos':'neg'}">${p.type==='receivable'?'+':'−'}${fmt(p.amount,p.currency)}</div>
         <button class="del" style="color:var(--green)" onclick="settlePR('${p.id}')">Settle →</button>
+        <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editPR('${p.id}')">Edit</button><button class="del" onclick="delPR('${p.id}')">Delete</button></div>
       </div>
     </div>`).join('') : `<div class="empty">Nothing owed either way.</div>`;
 
@@ -292,10 +309,12 @@ function accountOptions(sel){ return `<option value="main"${sel==='main'?' selec
 function curOptions(sel){ return ['QAR','JOD','AED','USD'].map(c=>`<option ${sel===c?'selected':''}>${c}</option>`).join(''); }
 function dateField(id){ return `<label class="f">Date</label><input type="date" id="${id}" value="${today()}">`; }
 
-/* deposit/withdraw to an account, converting into that account's own currency */
+/* deposit/withdraw to an account, converting into that account's own currency.
+   Each returns an "effect" {account,delta} in the account's native currency so it can be reversed later. */
 function accCurrency(a){ return a==='jordan'?'JOD':'QAR'; }
-function deposit(acc, amount, cur){ const q=toQAR(amount,cur); S.accounts[acc]+= fromQAR(q, accCurrency(acc)); }
-function withdraw(acc, amount, cur){ const q=toQAR(amount,cur); S.accounts[acc]-= fromQAR(q, accCurrency(acc)); }
+function deposit(acc, amount, cur){ const d= fromQAR(toQAR(amount,cur), accCurrency(acc)); S.accounts[acc]+=d; return {account:acc,delta:d}; }
+function withdraw(acc, amount, cur){ const d= fromQAR(toQAR(amount,cur), accCurrency(acc)); S.accounts[acc]-=d; return {account:acc,delta:-d}; }
+function reverseEffects(effects){ (effects||[]).forEach(e=>{ if(e&&S.accounts[e.account]!=null) S.accounts[e.account]-=e.delta; }); }
 
 /* ---------------- REVENUE ---------------- */
 let rev={cat:'income',recv:false,country:'Qatar'};
@@ -340,14 +359,14 @@ function saveRevenue(){
       log('💰',(det||'Car')+' (receivable)','Cars · '+rev.country,amount,cur,0,date);
     }else{
       const acc=document.getElementById('rvAcc').value;
-      deposit(acc,amount,cur);
-      S.cars.push({id:uid(),amount,currency:cur,country:rev.country,status:'paid',account:acc,detail:det,date});
+      const eff=deposit(acc,amount,cur);   // money effect stored on the car record, not the txn note
+      S.cars.push({id:uid(),amount,currency:cur,country:rev.country,status:'paid',account:acc,detail:det,date,effect:eff});
       log('💰',(det||'Car')+' sold','Cars · '+rev.country+' → '+accName(acc),amount,cur,1,date);
     }
   }else{
     const acc=document.getElementById('rvAcc').value;
-    deposit(acc,amount,cur);
-    log('💰',det||'Income','Income → '+accName(acc),amount,cur,1,date);
+    const eff=deposit(acc,amount,cur);
+    log('💰',det||'Income','Income → '+accName(acc),amount,cur,1,date,[eff],{kind:'income',account:acc,detail:det});
   }
   save(); closeSheet(); toast('Revenue saved');
 }
@@ -374,8 +393,8 @@ function saveExpense(){
   const det=document.getElementById('exDet').value.trim();
   const date=document.getElementById('exDate').value||today();
   if(!amount||amount<=0)return toast('Enter an amount');
-  withdraw(acc,amount,cur);
-  log('🧾',det||cat,cat+' · '+accName(acc),amount,cur,-1,date);
+  const eff=withdraw(acc,amount,cur);
+  log('🧾',det||cat,cat+' · '+accName(acc),amount,cur,-1,date,[eff],{kind:'expense',account:acc,detail:det||cat});
   save(); closeSheet(); toast('Expense saved');
 }
 
@@ -424,8 +443,8 @@ function addSalaryOnce(){
   const acc=document.getElementById('slAcc').value;
   const det=document.getElementById('slDet').value.trim();
   if(!amount||amount<=0)return toast('Enter an amount');
-  deposit(acc,amount,cur);
-  log('💼',det||'Salary','Salary → '+accName(acc),amount,cur,1,today());
+  const eff=deposit(acc,amount,cur);
+  log('💼',det||'Salary','Salary → '+accName(acc),amount,cur,1,today(),[eff],{kind:'salary',account:acc,detail:det});
   save(); closeSheet(); toast('Salary added once');
 }
 /* auto-add salary for the current month if due and not yet paid. force=ignore the day check. */
@@ -433,10 +452,10 @@ function runAutoSalary(force){
   const s=S.salary; if(!s)return false;
   if(s.lastPaid===curMonth())return false;                 // already paid this month
   if(!force && dayOfMonth()<s.day)return false;            // not yet reached pay day
-  deposit(s.account,s.amount,s.currency);
+  const eff=deposit(s.account,s.amount,s.currency);
   s.lastPaid=curMonth();
   const d=curMonth()+'-'+String(s.day).padStart(2,'0');
-  log('💼',s.detail||'Salary (auto)','Monthly salary → '+accName(s.account),s.amount,s.currency,1,d);
+  log('💼',s.detail||'Salary (auto)','Monthly salary → '+accName(s.account),s.amount,s.currency,1,d,[eff],{kind:'salary',account:s.account,detail:s.detail});
   save(); return true;
 }
 
@@ -482,12 +501,33 @@ function settlePR(id){
 function doSettlePR(id){
   const p=S.pr.find(x=>x.id===id); if(!p)return;
   const acc=document.getElementById('prAcc').value;
-  if(p.type==='receivable') deposit(acc,p.amount,p.currency); else withdraw(acc,p.amount,p.currency);
-  log(p.type==='receivable'?'📥':'📤', (p.name||'')+' settled', 'Settled '+(p.type==='receivable'?'→ ':'from ')+accName(acc), p.amount, p.currency, p.type==='receivable'?1:-1, today());
+  const eff = p.type==='receivable'? deposit(acc,p.amount,p.currency) : withdraw(acc,p.amount,p.currency);
+  log(p.type==='receivable'?'📥':'📤', (p.name||'')+' settled', 'Settled '+(p.type==='receivable'?'→ ':'from ')+accName(acc), p.amount, p.currency, p.type==='receivable'?1:-1, today(), [eff]);
   S.pr=S.pr.filter(x=>x.id!==id);
   save(); closeSheet(); toast('Settled');
 }
-function delPR(id){ S.pr=S.pr.filter(x=>x.id!==id); save(); closeSheet(); }
+function delPR(id){ if(!confirm('Delete this entry?'))return; S.pr=S.pr.filter(x=>x.id!==id); save(); closeSheet(); render(); toast('Deleted'); }
+function editPR(id){
+  const p=S.pr.find(x=>x.id===id); if(!p)return; prType=p.type;
+  openSheet(`
+   <h2>✎ Edit ${p.type==='receivable'?'receivable':'payable'}</h2>
+   <label class="f">Type</label>
+   <div class="seg"><button id="pr-recv" class="${p.type==='receivable'?'on':''}" onclick="setPR('receivable')">📥 Owed to me</button><button id="pr-pay" class="${p.type==='payable'?'on':''}" onclick="setPR('payable')">📤 I owe</button></div>
+   <label class="f">Person / name</label><input id="prName" value="${esc(p.name||'')}">
+   <label class="f">Amount</label>
+   <div class="amtrow"><input id="prAmt" type="text" inputmode="decimal" value="${p.amount}"><select id="prCur">${curOptions(p.currency)}</select></div>
+   <label class="f">Detail</label><input id="prDet" value="${esc(p.detail||'')}">
+   <label class="f">Date</label><input type="date" id="prDate" value="${p.date}">
+   <button class="btn" onclick="saveEditPR('${id}')">Save changes</button>
+   <button class="btn red" onclick="delPR('${id}')">Delete</button>
+  `);
+}
+function saveEditPR(id){
+  const p=S.pr.find(x=>x.id===id); if(!p)return;
+  const amount=num(document.getElementById('prAmt').value); if(!amount||amount<=0)return toast('Enter an amount');
+  Object.assign(p,{type:prType,name:document.getElementById('prName').value.trim(),amount,currency:document.getElementById('prCur').value,detail:document.getElementById('prDet').value.trim(),date:document.getElementById('prDate').value||p.date});
+  save(); closeSheet(); toast('Updated');
+}
 
 /* ---------------- CARS ---------------- */
 function openCarAdd(){
@@ -527,10 +567,39 @@ function markPaid(id){
 function doMarkPaid(id){
   const c=S.cars.find(x=>x.id===id); if(!c)return;
   const acc=document.getElementById('mpAcc').value;
-  deposit(acc,c.amount,c.currency);
+  c.effect=deposit(acc,c.amount,c.currency);   // effect stored on the car so delete/edit can reverse it
   c.status='paid'; c.account=acc;
   log('🚗',(c.detail||'Car')+' paid','Cars · '+c.country+' → '+accName(acc),c.amount,c.currency,1,today());
   save(); closeSheet(); toast('Transferred to '+accName(acc));
+}
+function editCar(id){
+  const c=S.cars.find(x=>x.id===id); if(!c)return; window._carC=c.country;
+  openSheet(`
+   <h2>✎ Edit car</h2>
+   <label class="f">Country</label>
+   <div class="seg"><button id="cq-Qatar" class="${c.country==='Qatar'?'on':''}" onclick="carC('Qatar')">🇶🇦 Qatar</button><button id="cq-UAE" class="${c.country==='UAE'?'on':''}" onclick="carC('UAE')">🇦🇪 UAE</button></div>
+   <label class="f">Amount</label>
+   <div class="amtrow"><input id="carAmt" type="text" inputmode="decimal" value="${c.amount}"><select id="carCur">${curOptions(c.currency)}</select></div>
+   <label class="f">Detail</label><input id="carDet" value="${esc(c.detail||'')}">
+   <label class="f">Date</label><input type="date" id="carDate" value="${c.date}">
+   ${c.status==='paid'?`<label class="f">Paid into account</label><select id="carAcc">${accountOptions(c.account)}</select>`:''}
+   <button class="btn" onclick="saveEditCar('${id}')">Save changes</button>
+   <button class="btn red" onclick="delCar('${id}')">Delete</button>
+  `);
+}
+function saveEditCar(id){
+  const c=S.cars.find(x=>x.id===id); if(!c)return;
+  const amount=num(document.getElementById('carAmt').value); if(!amount||amount<=0)return toast('Enter an amount');
+  const cur=document.getElementById('carCur').value;
+  const det=document.getElementById('carDet').value.trim();
+  const date=document.getElementById('carDate').value||c.date;
+  if(c.status==='paid'){                       // reverse old deposit, re-apply with new values
+    reverseEffects([c.effect]);
+    const acc=document.getElementById('carAcc').value;
+    c.effect=deposit(acc,amount,cur); c.account=acc;
+  }
+  Object.assign(c,{amount,currency:cur,detail:det,date,country:window._carC});
+  save(); closeSheet(); render(); toast('Updated');
 }
 function openCars(){
   const list=S.cars;
@@ -539,11 +608,17 @@ function openCars(){
       <div class="t">${esc(c.detail||'Car')} <span class="badge ${c.country==='UAE'?'uae':'qa'}">${c.country}</span></div>
       <div class="s">${c.status==='receivable'?'Receivable':'Paid → '+accName(c.account)} · ${fmtDate(c.date)}</div></div>
       <div style="text-align:right"><div class="amt">${fmt(c.amount,c.currency)}</div>
-      ${c.status==='receivable'?`<button class="del" style="color:var(--green)" onclick="markPaid('${c.id}')">Mark paid →</button>`:`<button class="del" onclick="delCar('${c.id}')">Delete</button>`}</div>
+      ${c.status==='receivable'?`<button class="del" style="color:var(--green)" onclick="markPaid('${c.id}')">Mark paid →</button>`:''}
+      <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editCar('${c.id}')">Edit</button><button class="del" onclick="delCar('${c.id}')">Delete</button></div></div>
     </div>`).join(''):'<div class="empty">No cars.</div>'}</div>
     <button class="btn ghost" onclick="openCarAdd()">+ Add car</button>`);
 }
-function delCar(id){ S.cars=S.cars.filter(x=>x.id!==id); save(); openCars(); }
+function delCar(id){
+  const c=S.cars.find(x=>x.id===id); if(!c)return;
+  if(!confirm('Delete this car?'+(c.status==='paid'?' The money it added to '+accName(c.account)+' will be put back.':'')))return;
+  if(c.status==='paid') reverseEffects([c.effect]);
+  S.cars=S.cars.filter(x=>x.id!==id); save(); closeSheet(); render(); toast('Deleted');
+}
 
 /* ---------------- GOLD ---------------- */
 function openGold(){
@@ -581,7 +656,7 @@ function openGold(){
        <div class="t">${title}</div><div class="s">Bought ${g.buyJOD} JOD (${fmt(bv,'QAR')}) · ${fmtDate(g.date)}</div></div>
        <div style="text-align:right"><div class="amt">${fmt(cv,'QAR')}</div>
        <div class="pl ${d>=0?'up':'down'}" style="font-size:11px">${d>=0?'+':'−'}${fmt(Math.abs(d),'QAR')}</div>
-       <button class="del" onclick="delGold('${g.id}')">Delete</button></div></div>`;
+       <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editGold('${g.id}')">Edit</button><button class="del" onclick="delGold('${g.id}')">Delete</button></div></div></div>`;
    }).join('')}</div>`:''}
    <p class="hint">Auto-refresh uses a live gold rate when your phone allows it; otherwise set the exact 21k Jordan JOD/gram manually — that value is always used for calculations.</p>
   `);
@@ -603,9 +678,34 @@ function addGold(){
   const liras = _gu==='l'? v : null;
   const grams = _gu==='l'? v*S.settings.liraGrams : v;
   S.gold.push({id:uid(),grams,liras,buyJOD,date});
-  _gu='g'; save(); openGold(); toast('Gold added');
+  _gu='g'; save(); closeSheet(); toast('Gold added');
 }
-function delGold(id){ S.gold=S.gold.filter(x=>x.id!==id); save(); openGold(); }
+function delGold(id){ if(!confirm('Delete this gold holding?'))return; S.gold=S.gold.filter(x=>x.id!==id); save(); openGold(); }
+function editGold(id){
+  const g=S.gold.find(x=>x.id===id); if(!g)return; _gu = g.liras? 'l':'g';
+  openSheet(`
+   <h2>✎ Edit gold</h2>
+   <div class="seg g"><button id="gu-g" class="${_gu==='g'?'on':''}" onclick="goldUnit('g')">By grams</button><button id="gu-l" class="${_gu==='l'?'on':''}" onclick="goldUnit('l')">By liras (1 = ${S.settings.liraGrams}g)</button></div>
+   <div class="goldrow" style="margin-top:10px">
+     <div><span class="dim" style="font-size:11px" id="gUnitLbl">${_gu==='l'?'Liras (×'+S.settings.liraGrams+'g)':'Grams'}</span><input id="gQty" type="text" inputmode="decimal" value="${g.liras||g.grams}" oninput="goldPreview()"></div>
+     <div><span class="dim" style="font-size:11px">Bought for (JOD total)</span><input id="gJOD" type="text" inputmode="decimal" value="${g.buyJOD}"></div>
+   </div>
+   <div class="hint" id="gPreview"></div>
+   <label class="f">Date</label><input type="date" id="gDate" value="${g.date}">
+   <button class="btn gold" onclick="saveEditGold('${id}')">Save changes</button>
+   <button class="btn red" onclick="delGold('${id}')">Delete</button>
+  `);
+  goldPreview();
+}
+function saveEditGold(id){
+  const g=S.gold.find(x=>x.id===id); if(!g)return;
+  const v=num(document.getElementById('gQty').value); if(!v||v<=0)return toast(_gu==='l'?'Enter liras':'Enter grams');
+  const buyJOD=num(document.getElementById('gJOD').value); if(!buyJOD||buyJOD<=0)return toast('Enter purchase price in JOD');
+  g.liras = _gu==='l'? v : null;
+  g.grams = _gu==='l'? v*S.settings.liraGrams : v;
+  g.buyJOD=buyJOD; g.date=document.getElementById('gDate').value||g.date;
+  _gu='g'; save(); openGold(); toast('Updated');
+}
 function editGoldPrice(){
   const v=prompt('Current 21k gold price in Jordan (JOD per gram):', S.settings.gold21kJOD);
   if(v===null)return; const n=num(v); if(!n||n<=0)return toast('Invalid');
@@ -689,16 +789,64 @@ function doTransfer(from,to){
 }
 
 /* ---------------- HISTORY / LOG ---------------- */
-function log(emoji,title,sub,amount,currency,dir,date){ S.txns.push({id:uid(),emoji,title,sub,amount,currency,dir,date}); }
+/* effects = [{account,delta}] applied to balances (reversed on delete). edit = {kind,account,cur} for editable rows. */
+function log(emoji,title,sub,amount,currency,dir,date,effects,edit){ S.txns.push({id:uid(),emoji,title,sub,amount,currency,dir,date,effects:effects||null,edit:edit||null}); }
 function openHistory(){
   const list=[...S.txns].reverse();
   openSheet(`<h2>🕑 All activity</h2><div class="list">${list.length?list.map(x=>`
     <div class="item"><div class="em">${x.emoji}</div><div class="mid"><div class="t">${esc(x.title)}</div>
     <div class="s">${esc(x.sub||'')} · ${fmtDate(x.date)}</div></div>
     <div style="text-align:right"><div class="amt ${x.dir>0?'pos':x.dir<0?'neg':''}">${x.dir>0?'+':x.dir<0?'−':''}${fmt(x.amount,x.currency)}</div>
-    <button class="del" onclick="delTxn('${x.id}')">Delete</button></div></div>`).join(''):'<div class="empty">No activity.</div>'}</div>`);
+    <div class="row" style="gap:8px;justify-content:flex-end">${x.edit?`<button class="del" style="color:var(--accent)" onclick="editTxn('${x.id}')">Edit</button>`:''}<button class="del" onclick="delTxn('${x.id}')">Delete</button></div></div></div>`).join(''):'<div class="empty">No activity.</div>'}</div>`);
 }
-function delTxn(id){ S.txns=S.txns.filter(x=>x.id!==id); save(); openHistory(); }
+function delTxn(id){ const x=S.txns.find(t=>t.id===id); if(!x)return; if(!confirm('Delete this entry? Any money it moved will be put back.'))return; reverseEffects(x.effects); S.txns=S.txns.filter(t=>t.id!==id); save(); openHistory(); toast('Deleted'); }
+function editTxn(id){
+  const x=S.txns.find(t=>t.id===id); if(!x||!x.edit)return toast('This entry can only be deleted');
+  openSheet(`
+   <h2>✎ Edit ${x.edit.kind}</h2>
+   <label class="f">Amount</label>
+   <div class="amtrow"><input id="etAmt" type="text" inputmode="decimal" value="${x.amount}"><select id="etCur">${curOptions(x.currency)}</select></div>
+   <label class="f">${x.edit.kind==='expense'?'From':'Into'} account</label><select id="etAcc">${accountOptions(x.edit.account)}</select>
+   <label class="f">Detail</label><input id="etDet" value="${esc(x.edit.detail||'')}">
+   <label class="f">Date</label><input type="date" id="etDate" value="${x.date}">
+   <button class="btn" onclick="saveEditTxn('${id}')">Save changes</button>
+   <button class="btn red" onclick="delTxn('${id}')">Delete this entry</button>
+  `);
+}
+function saveEditTxn(id){
+  const x=S.txns.find(t=>t.id===id); if(!x)return;
+  const amount=num(document.getElementById('etAmt').value);
+  const cur=document.getElementById('etCur').value;
+  const acc=document.getElementById('etAcc').value;
+  const det=document.getElementById('etDet').value.trim();
+  const date=document.getElementById('etDate').value||x.date;
+  if(!amount||amount<=0)return toast('Enter an amount');
+  reverseEffects(x.effects);                                   // undo old money move
+  const eff = x.edit.kind==='expense'? withdraw(acc,amount,cur) : deposit(acc,amount,cur);
+  const label = x.edit.kind==='salary'?'Salary':x.edit.kind==='expense'?(det||'Expense'):(det||'Income');
+  Object.assign(x,{amount,currency:cur,date,effects:[eff],
+    title:label, sub:(x.edit.kind==='expense'?'':x.edit.kind==='salary'?'Salary → ':'Income → ')+(x.edit.kind==='expense'?'From ':'')+accName(acc)});
+  x.edit={...x.edit,account:acc,detail:det};
+  save(); closeSheet(); toast('Updated');
+}
+
+/* ---------------- ASSETS BREAKDOWN ---------------- */
+function openBreakdown(){
+  const t=totals();
+  const row=(k,v,extra='')=>`<div class="kv"><span>${k}${extra?` <span class="dim" style="font-size:11px">${extra}</span>`:''}</span><span>${fmt(v,'QAR')}</span></div>`;
+  openSheet(`
+   <h2>📊 Total assets</h2>
+   ${row('🏦 Main account',t.mainQAR)}
+   ${row('🇯🇴 Jordan account',t.jordanQAR, fmt(S.accounts.jordan,'JOD'))}
+   ${row('🪙 Gold (21k)',t.goldQAR, t.grams.toLocaleString('en',{maximumFractionDigits:2})+' g')}
+   ${row('🚗 Cars receivable',t.carsRecvQAR, S.cars.filter(c=>c.status==='receivable').length+' pending')}
+   ${row('📥 Owed to me',t.receivables)}
+   <div class="kv" style="border-top:2px solid var(--line);margin-top:4px"><span style="font-weight:800">Total assets</span><span style="font-weight:800;color:var(--green)">${fmt(t.assets,'QAR')}</span></div>
+   ${row('📤 You owe (liabilities)',-t.liabilities)}
+   <div class="kv" style="border-top:2px solid var(--line);margin-top:4px"><span style="font-weight:800">Net worth</span><span style="font-weight:800">${fmt(t.net,'QAR')}</span></div>
+   <button class="btn ghost" onclick="closeSheet()">Close</button>
+  `);
+}
 
 /* ---------------- SETTINGS ---------------- */
 function openSettings(){
