@@ -270,7 +270,7 @@ function render(){
     <div class="acard tap" onclick="openCars()">
       <div class="ic">🚗</div><div class="nm">Cars receivable</div>
       <div class="bal">${fmt(t.carsRecvQAR,'QAR')}</div>
-      <div class="sub">${S.cars.filter(c=>c.status==='receivable').length} pending</div>
+      <div class="sub">≈ ${fmt(fromQAR(t.carsRecvQAR,'JOD'),'JOD')} · ${S.cars.filter(c=>c.status==='receivable').length} pending</div>
     </div>`;
 
   // cars list
@@ -284,6 +284,7 @@ function render(){
       </div>
       <div style="text-align:right">
         <div class="amt ${c.status==='paid'?'pos':''}">${fmt(c.amount,c.currency)}</div>
+        ${c.currency!=='JOD'?`<div class="sub" style="font-size:11px">≈ ${fmt(fromQAR(toQAR(c.amount,c.currency),'JOD'),'JOD')}</div>`:''}
         ${c.status==='receivable'?`<button class="del" style="color:var(--green)" onclick="markPaid('${c.id}')">Mark paid →</button>`:`<span class="badge paid">PAID</span>`}
         <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editCar('${c.id}')">Edit</button><button class="del" onclick="delCar('${c.id}')">Delete</button></div>
       </div>
@@ -660,6 +661,7 @@ function openCars(){
       <div class="t">${esc(c.detail||'Car')} <span class="badge ${c.country==='UAE'?'uae':'qa'}">${c.country}</span></div>
       <div class="s">${c.status==='receivable'?'Receivable':'Paid → '+accName(c.account)} · ${fmtDate(c.date)}</div></div>
       <div style="text-align:right"><div class="amt">${fmt(c.amount,c.currency)}</div>
+      ${c.currency!=='JOD'?`<div class="sub" style="font-size:11px">≈ ${fmt(fromQAR(toQAR(c.amount,c.currency),'JOD'),'JOD')}</div>`:''}
       ${c.status==='receivable'?`<button class="del" style="color:var(--green)" onclick="markPaid('${c.id}')">Mark paid →</button>`:''}
       <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editCar('${c.id}')">Edit</button><button class="del" onclick="delCar('${c.id}')">Delete</button></div></div>
     </div>`).join(''):'<div class="empty">No cars.</div>'}</div>
@@ -917,7 +919,7 @@ function openBreakdown(){
    ${row('🏦 Main account',t.mainQAR,'',"openAccount('main')")}
    ${row('🇯🇴 Jordan account',t.jordanQAR, fmt(S.accounts.jordan,'JOD'),"openAccount('jordan')")}
    ${row('🪙 Gold (21k)',t.goldQAR, t.grams.toLocaleString('en',{maximumFractionDigits:2})+' g',"openGold()")}
-   ${row('🚗 Cars receivable',t.carsRecvQAR, S.cars.filter(c=>c.status==='receivable').length+' pending',"openCars()")}
+   ${row('🚗 Cars receivable',t.carsRecvQAR, '≈ '+fmt(fromQAR(t.carsRecvQAR,'JOD'),'JOD'),"openCars()")}
    ${row('📥 Owed to me',t.receivables,'',"openKashf('receivable')")}
    <div class="kv" style="border-top:2px solid var(--line);margin-top:4px"><span style="font-weight:800">Total assets</span><span style="font-weight:800;color:var(--green)">${fmt(t.assets,'QAR')}</span></div>
    ${row('📤 You owe / payable',-t.liabilities,'',"openKashf('payable')")}
