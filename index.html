@@ -185,12 +185,31 @@
 <script>
 /* ---------------- STATE ---------------- */
 const LS='myMoney_v1';
+/* the three bank cards */
+const ACCTS=[
+  {key:'qDebit',  name:'Qatar Debit',       ic:'🏦', cur:'QAR', sub:'Qatar · Debit'},
+  {key:'qCredit', name:'Qatar Credit Card', ic:'💳', cur:'QAR', sub:'Qatar · Credit card'},
+  {key:'jDebit',  name:'Jordan Debit',      ic:'🇯🇴', cur:'JOD', sub:'Jordan · Debit'},
+];
+function acct(k){ return ACCTS.find(a=>a.key===k); }
 const DEFAULT={
   settings:{ rateJODtoQAR:5.13, rateAEDtoQAR:0.9942, rateUSDtoQAR:3.64,
-             gold21kJOD:47, goldUpdated:null, fxUpdated:null, liraGrams:8 },
-  accounts:{ main:0, jordan:0 },      // main=QAR, jordan=JOD
+             gold21kJOD:47, goldUpdated:null, fxUpdated:null, liraGrams:8, lastBackup:null },
+  accounts:{ qDebit:0, qCredit:0, jDebit:0 },
   gold:[], cars:[], pr:[], txns:[], salary:null
 };
+/* migrate old 2-account data (main→qDebit, jordan→jDebit) to the new 3-card model */
+function migrate(s){
+  const a=s.accounts||{};
+  if('main' in a || 'jordan' in a){
+    s.accounts={ qDebit:(+a.main||0)+(+a.qDebit||0), qCredit:(+a.qCredit||0), jDebit:(+a.jordan||0)+(+a.jDebit||0) };
+    const map={main:'qDebit',jordan:'jDebit'}, fix=k=>map[k]||k;
+    (s.cars||[]).forEach(c=>{ if(c.account)c.account=fix(c.account); if(c.effect&&c.effect.account)c.effect.account=fix(c.effect.account); });
+    (s.txns||[]).forEach(t=>{ (t.effects||[]).forEach(e=>{ if(e&&e.account)e.account=fix(e.account); }); if(t.edit&&t.edit.account)t.edit.account=fix(t.edit.account); if(t.restorePR&&t.restorePR.account)t.restorePR.account=fix(t.restorePR.account); });
+    if(s.salary&&s.salary.account)s.salary.account=fix(s.salary.account);
+  }
+  return s;
+}
 function clone(o){ return JSON.parse(JSON.stringify(o)); }   // works on every browser (structuredClone is too new for some phones)
 /* robust number parse: accepts Arabic-Indic ٠-٩ / Persian ۰-۹ digits, commas, spaces */
 function num(v){
@@ -203,7 +222,7 @@ function num(v){
   return parseFloat(s);
 }
 let S = load();
-function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)); if(d){ return {...clone(DEFAULT),...d, settings:{...DEFAULT.settings,...(d.settings||{})}, accounts:{...DEFAULT.accounts,...(d.accounts||{})}}; } }catch(e){} return clone(DEFAULT); }
+function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)); if(d){ return migrate({...clone(DEFAULT),...d, settings:{...DEFAULT.settings,...(d.settings||{})}, accounts:{...DEFAULT.accounts,...(d.accounts||{})}}); } }catch(e){} return clone(DEFAULT); }
 function save(){ localStorage.setItem(LS, JSON.stringify(S)); render(); }
 function uid(){ return 'i'+Math.random().toString(36).slice(2,9); }
 
@@ -215,18 +234,18 @@ function fmt(n,cur='QAR',dec=0){ const v=(n<0?'-':'')+cur+' '+Math.abs(n).toLoca
 function goldValueQAR(grams){ return toQAR(grams*S.settings.gold21kJOD,'JOD'); }
 
 function totals(){
-  const mainQAR=S.accounts.main;
-  const jordanQAR=toQAR(S.accounts.jordan,'JOD');
+  const accQAR={}; let accTotal=0;
+  ACCTS.forEach(a=>{ const q=toQAR(S.accounts[a.key]||0,a.cur); accQAR[a.key]=q; accTotal+=q; });
   const grams=S.gold.reduce((s,g)=>s+g.grams,0);
   const goldQAR=goldValueQAR(grams);
   const carsRecvQAR=S.cars.filter(c=>c.status==='receivable').reduce((s,c)=>s+toQAR(c.amount,c.currency),0);
   const receivables=S.pr.filter(p=>p.type==='receivable').reduce((s,p)=>s+toQAR(p.amount,p.currency),0);
   const payables=S.pr.filter(p=>p.type==='payable').reduce((s,p)=>s+toQAR(p.amount,p.currency),0);
   const prNet=receivables-payables;
-  const assets=mainQAR+jordanQAR+goldQAR+carsRecvQAR+receivables;   // everything you own / are owed
-  const liabilities=payables;                                        // what you owe
-  const net=assets-liabilities;                                      // net worth
-  return {mainQAR,jordanQAR,grams,goldQAR,carsRecvQAR,receivables,payables,prNet,assets,liabilities,net};
+  const assets=accTotal+goldQAR+carsRecvQAR+receivables;   // everything you own / are owed
+  const liabilities=payables;                              // what you owe
+  const net=assets-liabilities;                            // net worth
+  return {accQAR,accTotal,grams,goldQAR,carsRecvQAR,receivables,payables,prNet,assets,liabilities,net};
 }
 
 /* ---------------- RENDER ---------------- */
@@ -235,7 +254,7 @@ function render(){
   document.getElementById('netWorth').innerHTML = 'QAR '+Math.round(t.net).toLocaleString('en');
 
   // backup reminder: show if there's real data and it's been >7 days (or never) since last backup
-  const hasData = S.txns.length||S.cars.length||S.pr.length||S.gold.length||S.accounts.main||S.accounts.jordan;
+  const hasData = S.txns.length||S.cars.length||S.pr.length||S.gold.length||ACCTS.some(a=>S.accounts[a.key]);
   const lb=S.settings.lastBackup, days=lb?(Date.now()-lb)/86400000:Infinity;
   document.getElementById('backupBanner').innerHTML = (hasData && days>7)
     ? `<div class="bkbanner"><span>⚠️ ${lb?'Last backup '+timeAgo(lb)+'.':'You have no backup yet.'} Keep your data safe.</span><button onclick="openBackup()">Back up</button></div>` : '';
@@ -252,15 +271,12 @@ function render(){
   // account cards
   const grams=t.grams;
   const goldPL = t.goldQAR - S.gold.reduce((s,g)=>s+toQAR(g.buyJOD,'JOD'),0);
-  document.getElementById('cards').innerHTML=`
-    <div class="acard tap" onclick="openAccount('main')">
-      <div class="between"><div class="ic">🏦</div><div class="editpin">✎</div></div><div class="nm">Main account</div>
-      <div class="bal">${fmt(S.accounts.main,'QAR')}</div><div class="sub">Qatar · QAR</div>
-    </div>
-    <div class="acard tap" onclick="openAccount('jordan')">
-      <div class="between"><div class="ic">🇯🇴</div><div class="editpin">✎</div></div><div class="nm">Jordan account</div>
-      <div class="bal">${fmt(S.accounts.jordan,'JOD')}</div><div class="sub">≈ ${fmt(t.jordanQAR,'QAR')}</div>
-    </div>
+  document.getElementById('cards').innerHTML=
+    ACCTS.map(a=>{ const bal=S.accounts[a.key]||0; return `
+    <div class="acard tap" onclick="openAccount('${a.key}')">
+      <div class="between"><div class="ic">${a.ic}</div><div class="editpin">✎</div></div><div class="nm">${a.name}</div>
+      <div class="bal">${fmt(bal,a.cur)}</div><div class="sub">${a.cur==='QAR'?a.sub:'≈ '+fmt(toQAR(bal,a.cur),'QAR')}</div>
+    </div>`; }).join('')+`
     <div class="acard gold tap" onclick="openGold()">
       <div class="ic">🪙</div><div class="nm">Gold (21k)</div>
       <div class="bal">${fmt(t.goldQAR,'QAR')}</div>
@@ -323,7 +339,7 @@ function txRow(x){
 
 /* ---------------- UTIL ---------------- */
 function esc(s){return (s||'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));}
-function accName(a){return a==='main'?'Main':a==='jordan'?'Jordan':a;}
+function accName(a){ const x=acct(a); return x?x.name:a; }
 function today(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function fmtDate(s){ if(!s)return''; const d=new Date(s+'T00:00:00'); return d.toLocaleDateString('en',{day:'numeric',month:'short'}); }
 function timeAgo(ts){ const m=Math.round((Date.now()-ts)/60000); if(m<60)return m+'m ago'; const h=Math.round(m/60); if(h<24)return h+'h ago'; return Math.round(h/24)+'d ago'; }
@@ -332,13 +348,13 @@ function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.
 /* ---------------- SHEET FRAMEWORK ---------------- */
 function openSheet(html){ document.getElementById('sheetBody').innerHTML=html; document.getElementById('scrim').classList.add('open'); }
 function closeSheet(){ document.getElementById('scrim').classList.remove('open'); }
-function accountOptions(sel){ return `<option value="main"${sel==='main'?' selected':''}>🏦 Main (QAR)</option><option value="jordan"${sel==='jordan'?' selected':''}>🇯🇴 Jordan (JOD)</option>`; }
+function accountOptions(sel){ return ACCTS.map(a=>`<option value="${a.key}"${sel===a.key?' selected':''}>${a.ic} ${a.name} (${a.cur})</option>`).join(''); }
 function curOptions(sel){ return ['QAR','JOD','AED','USD'].map(c=>`<option ${sel===c?'selected':''}>${c}</option>`).join(''); }
 function dateField(id){ return `<label class="f">Date</label><input type="date" id="${id}" value="${today()}">`; }
 
 /* deposit/withdraw to an account, converting into that account's own currency.
    Each returns an "effect" {account,delta} in the account's native currency so it can be reversed later. */
-function accCurrency(a){ return a==='jordan'?'JOD':'QAR'; }
+function accCurrency(a){ const x=acct(a); return x?x.cur:'QAR'; }
 function deposit(acc, amount, cur){ const d= fromQAR(toQAR(amount,cur), accCurrency(acc)); S.accounts[acc]+=d; return {account:acc,delta:d}; }
 function withdraw(acc, amount, cur){ const d= fromQAR(toQAR(amount,cur), accCurrency(acc)); S.accounts[acc]-=d; return {account:acc,delta:-d}; }
 function reverseEffects(effects){ (effects||[]).forEach(e=>{ if(e&&S.accounts[e.account]!=null) S.accounts[e.account]-=e.delta; }); }
@@ -362,7 +378,7 @@ function openRevenue(){
    <label class="f">Amount</label>
    <div class="amtrow"><input id="rvAmt" type="text" inputmode="decimal" placeholder="0.00"><select id="rvCur">${curOptions('QAR')}</select></div>
 
-   <div id="acctWrap"><label class="f">Deposit into account</label><select id="rvAcc">${accountOptions('main')}</select></div>
+   <div id="acctWrap"><label class="f">Deposit into account</label><select id="rvAcc">${accountOptions('qDebit')}</select></div>
 
    <label class="f">Detail</label><input id="rvDet" placeholder="e.g. Toyota Camry sale / consulting">
    ${dateField('rvDate')}
@@ -404,7 +420,7 @@ function openExpense(){
    <h2>🧾 Add expense</h2>
    <label class="f">Amount</label>
    <div class="amtrow"><input id="exAmt" type="text" inputmode="decimal" placeholder="0.00"><select id="exCur">${curOptions('QAR')}</select></div>
-   <label class="f">From account</label><select id="exAcc">${accountOptions('main')}</select>
+   <label class="f">From account</label><select id="exAcc">${accountOptions('qDebit')}</select>
    <label class="f">Category</label>
    <select id="exCat"><option>General</option><option>Food</option><option>Transport</option><option>Bills</option><option>Shopping</option><option>Rent</option><option>Car costs</option><option>Other</option></select>
    <label class="f">Detail</label><input id="exDet" placeholder="optional note">
@@ -442,7 +458,7 @@ function openSalary(){
       <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">`:''}
    <label class="f">${s?'Update':'Set'} monthly salary</label>
    <div class="amtrow"><input id="slAmt" type="text" inputmode="decimal" placeholder="0.00" value="${s?s.amount:''}"><select id="slCur">${curOptions(s?s.currency:'QAR')}</select></div>
-   <label class="f">Into account</label><select id="slAcc">${accountOptions(s?s.account:'main')}</select>
+   <label class="f">Into account</label><select id="slAcc">${accountOptions(s?s.account:'qDebit')}</select>
    <label class="f">Paid on day of month</label>
    <input id="slDay" type="text" inputmode="numeric" min="1" max="28" value="${s?s.day:1}">
    <label class="f">Detail</label><input id="slDet" placeholder="e.g. Company monthly salary" value="${s?esc(s.detail||''):''}">
@@ -543,7 +559,7 @@ function settlePR(id){
    <h2>Settle ${p.type==='receivable'?'money owed to you':'money you owe'}</h2>
    <div class="kv"><span>${esc(p.name||'—')}</span><span>${fmt(p.amount,p.currency)}</span></div>
    <label class="f">${p.type==='receivable'?'Receive into which account?':'Pay from which account?'}</label>
-   <select id="prAcc">${accountOptions('main')}</select>
+   <select id="prAcc">${accountOptions('qDebit')}</select>
    <button class="btn" onclick="doSettlePR('${id}')">Confirm settle</button>
    <button class="btn ghost" onclick="render();delPR('${id}')">Delete without moving money</button>
   `);
@@ -611,7 +627,7 @@ function markPaid(id){
    <h2>Mark car as paid</h2>
    <div class="kv"><span>${esc(c.detail||'Car')} · ${c.country}</span><span>${fmt(c.amount,c.currency)}</span></div>
    <label class="f">Transfer the amount into which account?</label>
-   <select id="mpAcc">${accountOptions('main')}</select>
+   <select id="mpAcc">${accountOptions('qDebit')}</select>
    <p class="hint">The amount will be added to that account's balance.</p>
    <button class="btn" onclick="doMarkPaid('${id}')">Confirm — money received</button>
   `);
@@ -806,11 +822,12 @@ async function refreshGold(){
 
 /* ---------------- ACCOUNTS ---------------- */
 function openAccount(a){
-  const bal=S.accounts[a], cur=accCurrency(a);
+  const bal=S.accounts[a]||0, cur=accCurrency(a), x=acct(a);
   openSheet(`
-   <h2>${a==='main'?'🏦 Main account':'🇯🇴 Jordan account'}</h2>
+   <h2>${x.ic} ${x.name}</h2>
    <div class="kv"><span>Current balance</span><span>${fmt(bal,cur)}</span></div>
-   ${a==='jordan'?`<div class="kv"><span>In QAR</span><span>${fmt(toQAR(bal,'JOD'),'QAR')}</span></div>`:''}
+   ${cur!=='QAR'?`<div class="kv"><span>In QAR</span><span>${fmt(toQAR(bal,cur),'QAR')}</span></div>`:''}
+   ${a==='qCredit'?`<p class="hint" style="margin-top:0">💳 A negative balance here means money you still owe on the card.</p>`:''}
 
    <label class="f">✎ Edit balance directly (${cur})</label>
    <input id="accBal" type="text" inputmode="decimal" value="${bal}">
@@ -834,22 +851,25 @@ function adjAcc(a){
   save(); closeSheet(); toast('Updated');
 }
 function transferOpen(from){
-  const to= from==='main'?'jordan':'main';
+  const others=ACCTS.filter(a=>a.key!==from);
   openSheet(`
-   <h2>Transfer</h2>
+   <h2>🔁 Transfer</h2>
    <div class="kv"><span>From</span><span>${accName(from)} (${accCurrency(from)})</span></div>
-   <div class="kv"><span>To</span><span>${accName(to)} (${accCurrency(to)})</span></div>
+   <label class="f">To account</label>
+   <select id="trTo">${others.map(a=>`<option value="${a.key}">${a.ic} ${a.name} (${a.cur})</option>`).join('')}</select>
    <label class="f">Amount (in ${accCurrency(from)})</label>
    <input id="trAmt" type="text" inputmode="decimal" placeholder="0.00">
-   <button class="btn" onclick="doTransfer('${from}','${to}')">Transfer</button>
-   <p class="hint">Converted automatically at 1 JOD = ${S.settings.rateJODtoQAR} QAR.</p>
+   <button class="btn" onclick="doTransfer('${from}')">Transfer</button>
+   <p class="hint">Different currencies are converted automatically.</p>
   `);
 }
-function doTransfer(from,to){
+function doTransfer(from){
+  const to=document.getElementById('trTo').value;
   const v=num(document.getElementById('trAmt').value);
   if(!v||v<=0)return toast('Enter amount');
-  withdraw(from,v,accCurrency(from)); deposit(to,v,accCurrency(from));
-  log('🔁','Transfer',accName(from)+' → '+accName(to),v,accCurrency(from),0,today());
+  const e1=withdraw(from,v,accCurrency(from));
+  const e2=deposit(to,v,accCurrency(from));      // converts the from-currency amount into the to account's currency
+  log('🔁','Transfer',accName(from)+' → '+accName(to),v,accCurrency(from),0,today(),[e1,e2]);
   save(); closeSheet(); toast('Transferred');
 }
 
@@ -916,8 +936,7 @@ function openBreakdown(){
   openSheet(`
    <h2>📊 Total assets</h2>
    <p class="hint" style="margin-top:0">Tap any row with ✎ to edit that number.</p>
-   ${row('🏦 Main account',t.mainQAR,'',"openAccount('main')")}
-   ${row('🇯🇴 Jordan account',t.jordanQAR, fmt(S.accounts.jordan,'JOD'),"openAccount('jordan')")}
+   ${ACCTS.map(a=>row(a.ic+' '+a.name, t.accQAR[a.key], a.cur==='QAR'?'':fmt(S.accounts[a.key]||0,a.cur), "openAccount('"+a.key+"')")).join('')}
    ${row('🪙 Gold (21k)',t.goldQAR, t.grams.toLocaleString('en',{maximumFractionDigits:2})+' g',"openGold()")}
    ${row('🚗 Cars receivable',t.carsRecvQAR, '≈ '+fmt(fromQAR(t.carsRecvQAR,'JOD'),'JOD'),"openCars()")}
    ${row('📥 Owed to me',t.receivables,'',"openKashf('receivable')")}
