@@ -220,7 +220,8 @@ function acct(k){ return ACCTS.find(a=>a.key===k); }
 const DEFAULT={
   settings:{ rateJODtoQAR:5.13, rateAEDtoQAR:0.9942, rateUSDtoQAR:3.64,
              gold21kJOD:47, goldUpdated:null, fxUpdated:null, liraGrams:8, lastBackup:null,
-             cloudUrl:'', cloudKey:'', lastSync:null, lastCloudBackup:null, carRevUAE:850, carRevQatar:1000 },
+             cloudUrl:'', cloudKey:'', lastSync:null, lastCloudBackup:null, carRevUAE:850, carRevQatar:1000,
+             monthlySalary:19250, salaryByMonth:{} },
   updatedAt:0,
   accounts:{ qDebit:0, qCredit:0, qPrepaid:0, jDebit:0 },
   gold:[], cars:[], pr:[], txns:[], salary:null
@@ -303,6 +304,7 @@ function render(){
   const cmRev = S.cars.filter(c=>(c.date||'').slice(0,7)===curMonth()).reduce((s,c)=>s+carRev(c),0);
   const cmCount = S.cars.filter(c=>(c.date||'').slice(0,7)===curMonth()).length;
   const cmExp = S.txns.filter(x=>x.dir<0 && (x.date||'').slice(0,7)===curMonth()).reduce((s,x)=>s+toQAR(x.amount,x.currency),0);
+  const cmSavings = savingsForMonth(curMonth());
   document.getElementById('cards').innerHTML=
     ACCTS.map(a=>{ const bal=S.accounts[a.key]||0; return `
     <div class="acard tap" onclick="openAccount('${a.key}')">
@@ -329,6 +331,11 @@ function render(){
       <div class="ic">🧾</div><div class="nm">This month exp</div>
       <div class="bal">${fmt(cmExp,'QAR')}</div>
       <div class="sub">${monthLabel(curMonth())}</div>
+    </div>
+    <div class="acard tap" onclick="openSavings()">
+      <div class="ic">🐖</div><div class="nm">Savings this month</div>
+      <div class="bal" style="color:${cmSavings>=0?'var(--green)':'var(--red)'}">${fmt(cmSavings,'QAR')}</div>
+      <div class="sub">salary + car rev − exp</div>
     </div>`;
 
   // cars list
@@ -1337,6 +1344,60 @@ function openExpMonth(mo){
    <button class="btn ghost" onclick="openExpMonths()">← All months</button>
   `);
 }
+
+/* ---------------- SAVINGS (salary + car rev − expenses) ---------------- */
+function salaryForMonth(mo){ const o=S.settings.salaryByMonth||{}; return (o[mo]!=null && o[mo]!=='')? (+o[mo]||0) : (+S.settings.monthlySalary||0); }
+function carRevForMonth(mo){ const g=carRevByMonth()[mo]; return g?g.total:0; }
+function expForMonth(mo){ const g=expByMonth()[mo]; return g?g.total:0; }
+function savingsForMonth(mo){ return salaryForMonth(mo)+carRevForMonth(mo)-expForMonth(mo); }
+function activityMonths(){
+  const s=new Set([curMonth()]);
+  Object.keys(carRevByMonth()).forEach(m=>s.add(m));
+  Object.keys(expByMonth()).forEach(m=>s.add(m));
+  Object.keys(S.settings.salaryByMonth||{}).forEach(m=>s.add(m));
+  return [...s].sort().reverse();
+}
+function openSavings(){
+  const months=activityMonths();
+  openSheet(`
+   <h2>🐖 Savings by month</h2>
+   <div class="between" style="margin-bottom:8px"><p class="hint" style="margin:0">Savings = salary + car revenue − expenses. Salary ${fmt(+S.settings.monthlySalary||0,'QAR')}/mo.</p><a onclick="editSalaryBase()" style="color:var(--accent);font-size:12px;white-space:nowrap">✎ Salary</a></div>
+   <div class="list">${months.map(mo=>{ const v=savingsForMonth(mo); return `
+     <div class="item tap" onclick="openSavingsMonth('${mo}')"><div class="em">📅</div>
+     <div class="mid"><div class="t">${monthLabel(mo)}${mo===curMonth()?' <span class="badge paid">this month</span>':''}</div>
+     <div class="s">salary ${fmt(salaryForMonth(mo),'QAR')} · rev ${fmt(carRevForMonth(mo),'QAR')} · exp ${fmt(expForMonth(mo),'QAR')}</div></div>
+     <div style="text-align:right"><div class="amt ${v>=0?'pos':'neg'}">${fmt(v,'QAR')}</div><div class="s" style="color:var(--accent)">view ›</div></div></div>`; }).join('')}</div>
+  `);
+}
+function openSavingsMonth(mo){
+  const sal=salaryForMonth(mo), rev=carRevForMonth(mo), exp=expForMonth(mo), sav=sal+rev-exp;
+  const custom = (S.settings.salaryByMonth||{})[mo]!=null;
+  openSheet(`
+   <h2>🐖 ${monthLabel(mo)}</h2>
+   <div class="kv"><span>💼 Salary${custom?' <span class="badge">custom</span>':''}</span><span style="color:var(--green)">+${fmt(sal,'QAR')}</span></div>
+   <div class="kv"><span>📤 Revenue from cars</span><span style="color:var(--green)">+${fmt(rev,'QAR')}</span></div>
+   <div class="kv"><span>🧾 Expenses</span><span style="color:var(--red)">−${fmt(exp,'QAR')}</span></div>
+   <div class="kv" style="border-top:2px solid var(--line);margin-top:4px"><span style="font-weight:800">Savings</span><span style="font-weight:800;color:${sav>=0?'var(--green)':'var(--red)'}">${fmt(sav,'QAR')}</span></div>
+   <label class="f" style="margin-top:14px">✎ Salary for this month (QAR)</label>
+   <input id="savSal" type="text" inputmode="decimal" value="${sal}">
+   <button class="btn" onclick="saveSavingsMonthSalary('${mo}')">Save for ${monthLabel(mo)}</button>
+   ${custom?`<button class="btn ghost" onclick="clearSavingsMonthSalary('${mo}')">↺ Use default (${fmt(+S.settings.monthlySalary||0,'QAR')})</button>`:''}
+   <button class="btn ghost" onclick="openSavings()">← All months</button>
+  `);
+}
+function editSalaryBase(){
+  openSheet(`
+   <h2>✎ Monthly salary</h2>
+   <label class="f">Salary used for savings (QAR / month)</label>
+   <input id="salBase" type="text" inputmode="decimal" value="${+S.settings.monthlySalary||0}">
+   <button class="btn" onclick="saveSalaryBase()">Save</button>
+   <p class="hint">Used for every month, unless you set a custom salary on a specific month.</p>
+   <button class="btn ghost" onclick="openSavings()">← Back</button>
+  `);
+}
+function saveSalaryBase(){ const n=num(document.getElementById('salBase').value); if(isNaN(n))return toast('Enter a number'); S.settings.monthlySalary=n; save(); openSavings(); toast('Salary updated'); }
+function saveSavingsMonthSalary(mo){ const n=num(document.getElementById('savSal').value); if(isNaN(n))return toast('Enter a number'); if(!S.settings.salaryByMonth)S.settings.salaryByMonth={}; S.settings.salaryByMonth[mo]=n; save(); openSavingsMonth(mo); toast('Saved'); }
+function clearSavingsMonthSalary(mo){ if(S.settings.salaryByMonth) delete S.settings.salaryByMonth[mo]; save(); openSavingsMonth(mo); toast('Using default'); }
 
 /* ---------------- INIT ---------------- */
 runAutoSalary();          // add this month's salary automatically if due
