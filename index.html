@@ -179,6 +179,8 @@
   <!-- HISTORY -->
   <div class="sec"><h3>🕑 Recent activity</h3><a onclick="openHistory()">See all</a></div>
   <div class="list" id="histList"></div>
+
+  <button class="btn" style="background:var(--amber);color:#241d0e;margin-top:18px" onclick="openUrgentExit()">🚪 Urgent Exit — total if I leave now</button>
 </div>
 
 <!-- ============ SHEET ============ -->
@@ -227,7 +229,9 @@ const DEFAULT={
   settings:{ rateJODtoQAR:5.13, rateAEDtoQAR:0.9942, rateUSDtoQAR:3.64,
              gold21kJOD:47, goldUpdated:null, fxUpdated:null, liraGrams:8, lastBackup:null,
              cloudUrl:'', cloudKey:'', lastSync:null, lastCloudBackup:null, carRevUAE:850, carRevQatar:1000,
-             monthlySalary:19250, salaryByMonth:{} },
+             monthlySalary:19250, salaryByMonth:{},
+             exitBasic:9000, exitStart:'2022-11-01',
+             exitItems:[{name:'Nissan Patrol',value:25000},{name:'Cadillac Escalade',value:10000},{name:'Furniture',value:4000}] },
   updatedAt:0,
   accounts:{ qDebit:0, qCredit:0, qPrepaid:0, jDebit:0, cash:0 },
   gold:[], cars:[], pr:[], txns:[], salary:null, carRevEntries:[]
@@ -1599,6 +1603,47 @@ function editSalaryBase(){
 function saveSalaryBase(){ const n=num(document.getElementById('salBase').value); if(isNaN(n))return toast('Enter a number'); S.settings.monthlySalary=n; save(); openSavings(); toast('Salary updated'); }
 function saveSavingsMonthSalary(mo){ const n=num(document.getElementById('savSal').value); if(isNaN(n))return toast('Enter a number'); if(!S.settings.salaryByMonth)S.settings.salaryByMonth={}; S.settings.salaryByMonth[mo]=n; save(); openSavingsMonth(mo); toast('Saved'); }
 function clearSavingsMonthSalary(mo){ if(S.settings.salaryByMonth) delete S.settings.salaryByMonth[mo]; save(); openSavingsMonth(mo); toast('Using default'); }
+
+/* ---------------- URGENT EXIT ---------------- */
+function monthsServed(){
+  const st=(''+(S.settings.exitStart||'2022-11-01')).split('-');
+  const start=new Date(+st[0],(+st[1]||1)-1,+st[2]||1), now=new Date();
+  let m=(now.getFullYear()-start.getFullYear())*12+(now.getMonth()-start.getMonth());
+  if(now.getDate()<start.getDate()) m--;
+  return Math.max(0,m);
+}
+function endOfService(){ return (+S.settings.exitBasic||0)/12*monthsServed(); }
+function exitItemsTotal(){ return (S.settings.exitItems||[]).reduce((s,i)=>s+(+i.value||0),0); }
+function openUrgentExit(){
+  const net=totals().net, eos=endOfService(), mo=monthsServed(), items=S.settings.exitItems||[];
+  const total=net+eos+exitItemsTotal();
+  openSheet(`
+   <h2>🚪 Urgent exit</h2>
+   <p class="hint" style="margin-top:0">Everything you'd walk away with if you liquidate and leave now.</p>
+   <div class="kv"><span>💰 Total net worth</span><span>${fmt(net,'QAR')}</span></div>
+   <div class="kv"><span>🏢 End of service <span class="dim" style="font-size:11px">${mo} mo × ${fmt((+S.settings.exitBasic||0)/12,'QAR')}</span></span><span style="color:var(--green)">+${fmt(eos,'QAR')}</span></div>
+   ${items.map(i=>`<div class="kv"><span>📦 ${esc(i.name)}</span><span style="color:var(--green)">+${fmt(+i.value||0,'QAR')}</span></div>`).join('')}
+   <div class="kv" style="border-top:2px solid var(--line);margin-top:4px"><span style="font-weight:800">Urgent exit total</span><span style="font-weight:800;color:var(--green)">${fmt(total,'QAR')}</span></div>
+   <button class="btn ghost" onclick="editUrgentExit()">✎ Edit values</button>
+  `);
+}
+function editUrgentExit(){
+  const items=S.settings.exitItems||[];
+  openSheet(`
+   <h2>✎ Urgent exit values</h2>
+   <label class="f">End-of-service basic (per year — divided by 12/month)</label><input id="ueBasic" type="text" inputmode="decimal" value="${+S.settings.exitBasic||0}">
+   <label class="f">Company start date</label><input type="date" id="ueStart" value="${S.settings.exitStart||'2022-11-01'}">
+   ${items.map((i,idx)=>`<label class="f">${esc(i.name)} (QAR)</label><input id="ueItem${idx}" type="text" inputmode="decimal" value="${+i.value||0}">`).join('')}
+   <button class="btn" onclick="saveUrgentExit()">Save</button>
+   <button class="btn ghost" onclick="openUrgentExit()">← Back</button>
+  `);
+}
+function saveUrgentExit(){
+  const b=num(document.getElementById('ueBasic').value); if(!isNaN(b))S.settings.exitBasic=b;
+  const st=document.getElementById('ueStart').value; if(st)S.settings.exitStart=st;
+  (S.settings.exitItems||[]).forEach((i,idx)=>{ const el=document.getElementById('ueItem'+idx); if(el){ const v=num(el.value); if(!isNaN(v))i.value=v; } });
+  save(); openUrgentExit(); toast('Saved');
+}
 
 /* ---------------- INIT ---------------- */
 runAutoSalary();          // add this month's salary automatically if due
