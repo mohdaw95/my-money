@@ -494,7 +494,7 @@ function openExpense(){
 
    <div id="expNormal">
      <label class="f">Category</label>
-     <select id="exCat"><option>General</option><option>Food</option><option>Transport</option><option>Bills</option><option>Shopping</option><option>Rent</option><option>Car costs</option><option>Fawran</option><option>Other</option></select>
+     <select id="exCat">${catOptions('General')}</select>
      <label class="f">Detail</label><input id="exDet" placeholder="optional note">
    </div>
    <div id="expDepBlock" class="hide">
@@ -1206,7 +1206,9 @@ function editTxn(id){
    <h2>✎ Edit ${x.edit.kind}</h2>
    <label class="f">Amount</label>
    <div class="amtrow"><input id="etAmt" type="text" inputmode="decimal" value="${x.amount}"><select id="etCur">${curOptions(x.currency)}</select></div>
-   <label class="f">${x.edit.kind==='expense'?'From':'Into'} account</label><select id="etAcc">${accountOptions(x.edit.account)}</select>
+   ${x.edit.kind==='expense'
+     ? `<label class="f">Category</label><select id="etCat">${catOptions(x.cat||expenseCat(x))}</select>`
+     : `<label class="f">Into account</label><select id="etAcc">${accountOptions(x.edit.account)}</select>`}
    <label class="f">Detail</label><input id="etDet" value="${esc(x.edit.detail||'')}">
    <label class="f">Date</label><input type="date" id="etDate" value="${x.date}">
    <button class="btn" onclick="saveEditTxn('${id}')">Save changes</button>
@@ -1217,16 +1219,23 @@ function saveEditTxn(id){
   const x=S.txns.find(t=>t.id===id); if(!x)return;
   const amount=num(document.getElementById('etAmt').value);
   const cur=document.getElementById('etCur').value;
-  const acc=document.getElementById('etAcc').value;
+  const accEl=document.getElementById('etAcc'); const acc=accEl?accEl.value:x.edit.account;
+  const catEl=document.getElementById('etCat');
   const det=document.getElementById('etDet').value.trim();
   const date=document.getElementById('etDate').value||x.date;
   if(!amount||amount<=0)return toast('Enter an amount');
   reverseEffects(x.effects);                                   // undo old money move
-  const eff = x.edit.kind==='expense'? null : deposit(acc,amount,cur);  // expenses don't touch balances
-  const label = x.edit.kind==='salary'?'Salary':x.edit.kind==='expense'?(det||'Expense'):(det||'Income');
-  Object.assign(x,{amount,currency:cur,date,effects:eff?[eff]:null,
-    title:label, sub:(x.edit.kind==='expense'?'':x.edit.kind==='salary'?'Salary → ':'Income → ')+(x.edit.kind==='expense'?'From ':'')+accName(acc)});
-  x.edit={...x.edit,account:acc,detail:det};
+  if(x.edit.kind==='expense'){
+    if(catEl) x.cat=catEl.value;
+    Object.assign(x,{amount,currency:cur,date,effects:null, title:det||x.cat||'Expense', sub:x.cat||'Expense'});
+    x.edit={...x.edit,detail:det};
+  }else{
+    const eff=deposit(acc,amount,cur);
+    const label = x.edit.kind==='salary'?'Salary':(det||'Income');
+    Object.assign(x,{amount,currency:cur,date,effects:[eff],
+      title:label, sub:(x.edit.kind==='salary'?'Salary → ':'Income → ')+accName(acc)});
+    x.edit={...x.edit,account:acc,detail:det};
+  }
   save(); closeSheet(); toast('Updated');
 }
 
@@ -1399,11 +1408,29 @@ function parseSms(raw){
   const am=norm.match(/(?:QAR|JOD|AED|SAR|USD|ر\.?ق|د\.?ا)\s*([\d,]+(?:\.\d+)?)/i) || norm.match(/([\d,]+(?:\.\d+)?)\s*(?:QAR|JOD|AED|SAR|USD)/i);
   if(am) amount=num(am[1]);
   else { const any=norm.match(/([\d,]+\.\d{1,2}|\d{2,}[\d,]*)/); if(any) amount=num(any[1]); }
-  const credit=/credit|deposit|received|salary|refund|added|reversal|إيداع|اضاف|راتب|استلام|مستلم/i.test(raw);
-  const debit=/debit|purchase|withdraw|spent|deducted|payment|pos|paid|شراء|سحب|خصم|دفع|مشترى/i.test(raw);
+  // NB: "credited" = money in; plain "credit" (as in "credit card") must NOT count as income
+  const credit=/credited|deposit|received|salary|refund|reversal|\bcr\b|إيداع|اضاف|راتب|استلام|مستلم/i.test(raw);
+  const debit=/debited|\bdebit\b|purchase|withdraw|spent|deducted|payment|\bpos\b|paid|\bused\b|شراء|سحب|خصم|دفع|مشترى/i.test(raw);
   const type = (credit && !debit) ? 'income' : 'expense';
   return {amount,availBalance,type};
 }
+/* auto-categorise an expense from its merchant / message text */
+const CATEGORIES=['General','Groceries','Food & Dining','Fuel','Transport','Bills','Shopping','Health','Entertainment','Travel','ATM / Cash','Transfer','Car costs','Rent','Other'];
+const CAT_RULES=[
+  ['Groceries', /carrefour|lulu|al\s?meera|almeera|monoprix|supermarket|hypermarket|grocery|baqala|family food|safari|megamart|quick\s?mart|mahaseel|grand\s?mall|saudia/i],
+  ['Food & Dining', /talabat|snoonu|rafeeq|restaurant|cafe|coffee|starbucks|mcdonald|\bkfc\b|burger|pizza|domino|subway|dunkin|costa|tim\s?horton|shawarma|karak|bakery|baskin|nando|texas|hardee|papa\s?john|krispy|chili|dairy queen|sushi|grill/i],
+  ['Fuel', /woqod|petrol|\bfuel\b|filling station|\bstation\b/i],
+  ['Transport', /karwa|taxi|uber|careem|metro|\bbus\b|parking|mowasalat|salik|nol\b/i],
+  ['Bills', /ooredoo|vodafone|kahramaa|electricity|\bwater\b|utility|\bbill\b|internet|postpaid|recharge/i],
+  ['Shopping', /\bmall\b|ikea|h&m|zara|centrepoint|home\s?centre|amazon|\bnoon\b|virgin|apple store|ounass|namshi|sephora|\bmax\b|splash|waikiki|decathlon|jarir|electronics/i],
+  ['Health', /pharmacy|hospital|clinic|medical|\baster\b|naseem|kulud|dental|\bdr\.?\b/i],
+  ['Entertainment', /cinema|\bvox\b|novo|netflix|spotify|playstation|\bgame\b|steam|shahid|osn/i],
+  ['Travel', /qatar airways|airways|airline|flight|\bhotel\b|booking\.com|agoda|airbnb/i],
+  ['ATM / Cash', /\batm\b|cash withdrawal|withdrawal/i],
+  ['Transfer', /transfer|fawran|remittance|western union|moneygram/i],
+];
+function categorize(text){ const s=''+(text||''); for(const [cat,re] of CAT_RULES){ if(re.test(s)) return cat; } return 'General'; }
+function catOptions(sel){ const list=[...CATEGORIES]; if(sel && !list.includes(sel)) list.unshift(sel); return list.map(c=>`<option ${sel===c?'selected':''}>${esc(c)}</option>`).join(''); }
 function applyInboxItem(it){
   const p=parseSms(it.raw);
   const amount=(it.amount!=null && it.amount!=='')?num(it.amount):p.amount;
@@ -1424,7 +1451,7 @@ function applyInboxItem(it){
       log('📩',det,'Bank SMS → '+accName(acc),amount,cur,1,date,null,{kind:'income',account:acc,detail:det});
     }else{
       log('📩',det,'Bank SMS · '+accName(acc),amount,cur,-1,date,null,{kind:'expense',account:acc,detail:det});
-      S.txns[S.txns.length-1].cat=it.category||'Bank SMS';
+      S.txns[S.txns.length-1].cat=it.category||categorize(it.raw||det);
     }
     const x=S.txns[S.txns.length-1]; x.time=time; x.raw=it.raw;   // merchant time + keep full message
   }
