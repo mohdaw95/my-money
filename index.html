@@ -212,7 +212,7 @@ function routeAccount(raw, fallback){
 }
 /* revenue earned per exported car — editable rates in settings, plus optional per-car override (c.rev) */
 function carRate(country){ return country==='UAE' ? (+S.settings.carRevUAE||0) : (+S.settings.carRevQatar||0); }
-function carRev(c){ return (c.rev!=null && c.rev!=='') ? (+c.rev||0) : carRate(c.country); }
+function carRev(c){ if(c.rev!=null && c.rev!=='') return +c.rev||0; if(c.commission!=null && c.commission!=='') return +c.commission||0; return carRate(c.country); }
 function carRevByMonth(){
   const m={};
   const slot=mo=>{ if(!m[mo])m[mo]={total:0,count:0,cars:[],entries:[]}; return m[mo]; };
@@ -662,44 +662,60 @@ function saveEditPR(id){
 }
 
 /* ---------------- CARS ---------------- */
+/* default per-car amounts by country (commission = the rev-from-cars rate) */
+function carDefaults(country){
+  return { commission: carRate(country), deposit: country==='Qatar'?1000:0, inspection: country==='Qatar'?150:0, transfer: 0 };
+}
+/* the breakdown fields; receivable = their sum (live) */
+function carFormFields(c){ return `
+   <label class="f">Commission (QAR)</label><input id="carComm" type="text" inputmode="decimal" value="${c.commission!=null?c.commission:''}" oninput="carRecvPreview()">
+   <label class="f">Deposit (QAR)</label><input id="carDep" type="text" inputmode="decimal" value="${c.deposit!=null?c.deposit:''}" oninput="carRecvPreview()">
+   <label class="f">Inspection (QAR)</label><input id="carInsp" type="text" inputmode="decimal" value="${c.inspection!=null?c.inspection:''}" oninput="carRecvPreview()">
+   <label class="f">Transfer fee (QAR)</label><input id="carTrans" type="text" inputmode="decimal" value="${c.transfer!=null?c.transfer:''}" oninput="carRecvPreview()">
+   <div class="kv" style="margin-top:10px"><span style="font-weight:800">Receivable total</span><span style="font-weight:800;color:var(--green)" id="carRecvTotal">QAR 0</span></div>`;
+}
+function carRecvPreview(){
+  const t=['carComm','carDep','carInsp','carTrans'].reduce((s,id)=>{ const el=document.getElementById(id); return s+(el?(num(el.value)||0):0); },0);
+  const el=document.getElementById('carRecvTotal'); if(el) el.textContent=fmt(t,'QAR');
+  return t;
+}
 function openCarAdd(){
+  window._carC='Qatar';
   openSheet(`
    <h2>🚗 Add car (receivable)</h2>
    <label class="f">Title</label><input id="carDet" placeholder="e.g. Cross Syrian">
    <label class="f">Country</label>
-   <div class="seg"><button id="cq-Qatar" class="on" onclick="carC('Qatar')">🇶🇦 Qatar</button><button id="cq-UAE" onclick="carC('UAE')">🇦🇪 UAE</button></div>
-   <label class="f">Receivable amount</label>
-   <div class="amtrow"><input id="carAmt" type="text" inputmode="decimal" placeholder="0.00"><select id="carCur">${curOptions('QAR')}</select></div>
-   ${carExtraFields({})}
+   <div class="seg"><button id="cq-Qatar" class="on" onclick="carCAdd('Qatar')">🇶🇦 Qatar</button><button id="cq-UAE" onclick="carCAdd('UAE')">🇦🇪 UAE</button></div>
+   ${carFormFields(carDefaults('Qatar'))}
    ${dateField('carDate')}
    <button class="btn" onclick="saveCar()">Save as receivable</button>
   `);
-  window._carC='Qatar';
+  carRecvPreview();
 }
-/* optional per-car breakdown fields (shown in the WhatsApp summary when filled) */
-function carExtraFields(c){ return `
-   <label class="f">Deposit (optional)</label><input id="carDep" type="text" inputmode="decimal" value="${c.deposit!=null?c.deposit:''}" placeholder="—">
-   <label class="f">Commission (optional)</label><input id="carComm" type="text" inputmode="decimal" value="${c.commission!=null?c.commission:''}" placeholder="—">
-   <label class="f">Inspection (optional)</label><input id="carInsp" type="text" inputmode="decimal" value="${c.inspection!=null?c.inspection:''}" placeholder="—">
-   <label class="f">Transfer (optional)</label><input id="carTrans" type="text" inputmode="decimal" value="${c.transfer!=null?c.transfer:''}" placeholder="—">`;
+/* country toggle in the ADD form re-fills the country defaults */
+function carCAdd(country){
+  window._carC=country;
+  document.getElementById('cq-Qatar').classList.toggle('on',country==='Qatar');
+  document.getElementById('cq-UAE').classList.toggle('on',country==='UAE');
+  const d=carDefaults(country);
+  document.getElementById('carComm').value=d.commission;
+  document.getElementById('carDep').value=d.deposit;
+  document.getElementById('carInsp').value=d.inspection;
+  document.getElementById('carTrans').value=d.transfer;
+  carRecvPreview();
 }
-function readCarExtras(c){
-  [['carDep','deposit'],['carComm','commission'],['carInsp','inspection'],['carTrans','transfer']].forEach(([id,f])=>{
-    const el=document.getElementById(id); if(!el)return;
-    const raw=el.value.trim(); if(raw===''){ delete c[f]; } else { const n=num(raw); if(!isNaN(n)) c[f]=n; }
-  });
-}
+/* country toggle in the EDIT form just changes the country (keeps values) */
 function carC(c){ window._carC=c; document.getElementById('cq-Qatar').classList.toggle('on',c==='Qatar'); document.getElementById('cq-UAE').classList.toggle('on',c==='UAE'); }
 function saveCar(){
-  const amount=num(document.getElementById('carAmt').value);
-  const cur=document.getElementById('carCur').value;
   const det=document.getElementById('carDet').value.trim();
   const date=document.getElementById('carDate').value||today();
-  if(!amount||amount<=0)return toast('Enter an amount');
-  const c={id:uid(),amount,currency:cur,country:window._carC,status:'receivable',detail:det,date};
-  readCarExtras(c);
+  const comm=num(document.getElementById('carComm').value)||0, dep=num(document.getElementById('carDep').value)||0,
+        insp=num(document.getElementById('carInsp').value)||0, trans=num(document.getElementById('carTrans').value)||0;
+  const amount=comm+dep+insp+trans;
+  if(amount<=0)return toast('Enter the amounts');
+  const c={id:uid(),amount,currency:'QAR',country:window._carC,status:'receivable',detail:det,date,commission:comm,deposit:dep,inspection:insp,transfer:trans};
   S.cars.push(c); carTxnSync(c);
-  save(); closeSheet(); toast('Car added');
+  save(); closeSheet(); toast('Car added · receivable '+fmt(amount,'QAR'));
 }
 function markPaid(id){
   const c=S.cars.find(x=>x.id===id); if(!c)return;
@@ -727,28 +743,27 @@ function editCar(id){
    <label class="f">Country</label>
    <div class="seg"><button id="cq-Qatar" class="${c.country==='Qatar'?'on':''}" onclick="carC('Qatar')">🇶🇦 Qatar</button><button id="cq-UAE" class="${c.country==='UAE'?'on':''}" onclick="carC('UAE')">🇦🇪 UAE</button></div>
    <label class="f">Title</label><input id="carDet" value="${esc(c.detail||'')}">
-   <label class="f">Receivable amount</label>
-   <div class="amtrow"><input id="carAmt" type="text" inputmode="decimal" value="${c.amount}"><select id="carCur">${curOptions(c.currency)}</select></div>
-   ${carExtraFields(c)}
+   ${carFormFields(c)}
    <label class="f">Date</label><input type="date" id="carDate" value="${c.date}">
    ${c.status==='paid'?`<label class="f">Paid into account</label><select id="carAcc">${accountOptions(c.account)}</select>`:''}
    <button class="btn" onclick="saveEditCar('${id}')">Save changes</button>
    <button class="btn red" onclick="delCar('${id}')">Delete</button>
   `);
+  carRecvPreview();
 }
 function saveEditCar(id){
   const c=S.cars.find(x=>x.id===id); if(!c)return;
-  const amount=num(document.getElementById('carAmt').value); if(!amount||amount<=0)return toast('Enter an amount');
-  const cur=document.getElementById('carCur').value;
+  const comm=num(document.getElementById('carComm').value)||0, dep=num(document.getElementById('carDep').value)||0,
+        insp=num(document.getElementById('carInsp').value)||0, trans=num(document.getElementById('carTrans').value)||0;
+  const amount=comm+dep+insp+trans; if(amount<=0)return toast('Enter the amounts');
   const det=document.getElementById('carDet').value.trim();
   const date=document.getElementById('carDate').value||c.date;
-  if(c.status==='paid'){                       // reverse old deposit, re-apply with new values
+  if(c.status==='paid'){                       // reverse old deposit, re-apply with new receivable
     reverseEffects([c.effect]);
     const acc=document.getElementById('carAcc').value;
-    c.effect=deposit(acc,amount,cur); c.account=acc;
+    c.effect=deposit(acc,amount,'QAR'); c.account=acc;
   }
-  Object.assign(c,{amount,currency:cur,detail:det,date,country:window._carC});
-  readCarExtras(c);
+  Object.assign(c,{amount,currency:'QAR',detail:det,date,country:window._carC,commission:comm,deposit:dep,inspection:insp,transfer:trans});
   carTxnSync(c);                               // keep the linked activity note in sync
   save(); closeSheet(); render(); toast('Updated');
 }
@@ -781,7 +796,7 @@ function carSummaryText(){
     const cur=c.currency||'QAR';
     L.push('*Car '+(i+1)+': '+(c.detail||'Car')+'*');
     L.push('Country: '+c.country);
-    const add=(label,v)=>{ if(v!=null && v!=='' && !isNaN(+v)) L.push(label+': '+fmt(+v,cur)); };
+    const add=(label,v)=>{ if(v!=null && v!=='' && !isNaN(+v) && +v!==0) L.push(label+': '+fmt(+v,cur)); };
     add('Deposit',c.deposit);
     add('Commission',c.commission);
     add('Inspection',c.inspection);
