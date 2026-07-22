@@ -20,7 +20,7 @@ export default {
 
     const url = new URL(req.url);
     const auth = req.headers.get('Authorization') || url.searchParams.get('key') || '';
-    const key = auth.replace(/^Bearer\s+/i, '');
+    const key = auth.replace(/^Bearer\s+/i, '').trim();
     if (!env.SECRET || key !== env.SECRET) return json({ error: 'unauthorized' }, 401);
 
     const path = url.pathname.replace(/\/+$/, '') || '/';
