@@ -480,29 +480,63 @@ function saveRevenue(){
 }
 
 /* ---------------- EXPENSE ---------------- */
+let _expIsDeposit=false;
 function openExpense(){
+  _expIsDeposit=false;
+  const recvCars=S.cars.filter(c=>c.status==='receivable');
   openSheet(`
    <h2>🧾 Add expense</h2>
    <label class="f">Amount</label>
    <div class="amtrow"><input id="exAmt" type="text" inputmode="decimal" placeholder="0.00"><select id="exCur">${curOptions('QAR')}</select></div>
-   <label class="f">From account</label><select id="exAcc">${accountOptions('qDebit')}</select>
-   <label class="f">Category</label>
-   <select id="exCat"><option>General</option><option>Food</option><option>Transport</option><option>Bills</option><option>Shopping</option><option>Rent</option><option>Car costs</option><option>Other</option></select>
-   <label class="f">Detail</label><input id="exDet" placeholder="optional note">
+
+   <label class="f">Is this a car deposit? (Fawran transfer)</label>
+   <div class="seg"><button id="ed-no" class="on" onclick="expDep(false)">No — normal expense</button><button id="ed-yes" onclick="expDep(true)">Yes — car deposit</button></div>
+
+   <div id="expNormal">
+     <label class="f">Category</label>
+     <select id="exCat"><option>General</option><option>Food</option><option>Transport</option><option>Bills</option><option>Shopping</option><option>Rent</option><option>Car costs</option><option>Fawran</option><option>Other</option></select>
+     <label class="f">Detail</label><input id="exDet" placeholder="optional note">
+   </div>
+   <div id="expDepBlock" class="hide">
+     <label class="f">Which car's deposit?</label>
+     <select id="exCarSel">${recvCars.length? recvCars.map(c=>`<option value="${c.id}">${esc(c.detail||'Car')} · ${c.country} (deposit now ${fmt(c.deposit||0,'QAR')})</option>`).join('') : '<option value="">— no receivable cars —</option>'}</select>
+     <p class="hint">The amount becomes this car's deposit and updates its receivable total.</p>
+   </div>
+
    ${dateField('exDate')}
-   <button class="btn red" onclick="saveExpense()">Save expense</button>
+   <button class="btn red" onclick="saveExpense()">Save</button>
+   <p class="hint">Expenses are tracked for budgeting only — they don't reduce any account balance / net worth.</p>
   `);
+}
+function expDep(v){
+  _expIsDeposit=v;
+  document.getElementById('ed-yes').classList.toggle('on',v);
+  document.getElementById('ed-no').classList.toggle('on',!v);
+  document.getElementById('expNormal').classList.toggle('hide',v);
+  document.getElementById('expDepBlock').classList.toggle('hide',!v);
 }
 function saveExpense(){
   const amount=num(document.getElementById('exAmt').value);
   const cur=document.getElementById('exCur').value;
-  const acc=document.getElementById('exAcc').value;
-  const cat=document.getElementById('exCat').value;
-  const det=document.getElementById('exDet').value.trim();
   const date=document.getElementById('exDate').value||today();
   if(!amount||amount<=0)return toast('Enter an amount');
-  // expenses are tracked for budgeting only — they do NOT reduce account balances / net worth
-  log('🧾',det||cat,cat+' · '+accName(acc),amount,cur,-1,date,null,{kind:'expense',account:acc,detail:det||cat});
+
+  if(_expIsDeposit){
+    const carId=document.getElementById('exCarSel').value;
+    const c=S.cars.find(x=>x.id===carId);
+    if(!c)return toast('Choose a car');
+    c.deposit=Math.round(toQAR(amount,cur));                                  // set the car's deposit (QAR)
+    if(c.currency==null)c.currency='QAR';
+    c.amount=(+c.commission||0)+(+c.deposit||0)+(+c.inspection||0)+(+c.transfer||0);  // recompute receivable
+    carTxnSync(c);
+    save(); closeSheet(); toast('Deposit set for '+(c.detail||'car')+' · receivable '+fmt(c.amount,'QAR'));
+    return;
+  }
+
+  const cat=document.getElementById('exCat').value;
+  const det=document.getElementById('exDet').value.trim();
+  // normal expense — tracked for budgeting only, no account effect
+  log('🧾',det||cat,cat,amount,cur,-1,date,null,{kind:'expense',detail:det||cat});
   S.txns[S.txns.length-1].cat=cat;
   save(); closeSheet(); toast('Expense saved');
 }
