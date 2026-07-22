@@ -7,3 +7,6 @@ workers_dev = true
 kv_namespaces = [
   { binding = "STORE", id = "3faa32b0f3b14a1f8fe151bcdd51c187" }
 ]
+
+[triggers]
+crons = ["0 3 * * *"]   # daily snapshot at 03:00 UTC

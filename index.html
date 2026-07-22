@@ -220,7 +220,7 @@ function acct(k){ return ACCTS.find(a=>a.key===k); }
 const DEFAULT={
   settings:{ rateJODtoQAR:5.13, rateAEDtoQAR:0.9942, rateUSDtoQAR:3.64,
              gold21kJOD:47, goldUpdated:null, fxUpdated:null, liraGrams:8, lastBackup:null,
-             cloudUrl:'', cloudKey:'', lastSync:null, carRevUAE:850, carRevQatar:1000 },
+             cloudUrl:'', cloudKey:'', lastSync:null, lastCloudBackup:null, carRevUAE:850, carRevQatar:1000 },
   updatedAt:0,
   accounts:{ qDebit:0, qCredit:0, qPrepaid:0, jDebit:0 },
   gold:[], cars:[], pr:[], txns:[], salary:null
@@ -1148,8 +1148,43 @@ async function syncCloud(opts){
     if(applied){ localStorage.setItem(LS,JSON.stringify(S)); render(); toast(applied+' bank update'+(applied>1?'s':'')+' added'); }
     await cloudPush();
     S.settings.lastSync=Date.now(); localStorage.setItem(LS,JSON.stringify(S));
+    // daily cloud backup — snapshot once per day when the app is opened (belt-and-braces with the server cron)
+    if(S.settings.lastCloudBackup!==today()){
+      try{ await fetch(base+'/backup',{method:'POST',headers:cloudHeaders()}); S.settings.lastCloudBackup=today(); localStorage.setItem(LS,JSON.stringify(S)); }catch(e){}
+    }
     if(opts.manual)toast('Synced ✓');
   }catch(e){ if(opts.manual)toast('Sync failed — check the address'); }
+}
+/* ---- restore from Cloudflare (latest or a daily backup) ---- */
+async function openCloudRestore(){
+  if(!cloudBase())return toast('Connect cloud first');
+  toast('Loading backups…');
+  let dates=[];
+  try{ const r=await fetch(cloudBase()+'/backups',{headers:cloudHeaders()}); if(r.status===401)return toast('Wrong secret key'); dates=(await r.json()).backups||[]; }
+  catch(e){ return toast('Could not reach cloud'); }
+  openSheet(`
+   <h2>☁️ Restore from Cloudflare</h2>
+   <p class="hint" style="margin-top:0">Pick a version to load onto this device. It replaces everything currently in the app.</p>
+   <div class="list">
+     <div class="item tap" onclick="doCloudRestore('latest')"><div class="em">🟢</div><div class="mid"><div class="t">Latest (live cloud)</div><div class="s">your current synced data</div></div><div class="s" style="color:var(--accent)">restore ›</div></div>
+     ${dates.map(dt=>`<div class="item tap" onclick="doCloudRestore('${dt}')"><div class="em">📅</div><div class="mid"><div class="t">${dt}</div><div class="s">daily backup</div></div><div class="s" style="color:var(--accent)">restore ›</div></div>`).join('')}
+   </div>
+   ${dates.length?'':'<div class="empty">No daily backups yet — they start from today and keep the last 30 days.</div>'}
+   <button class="btn ghost" onclick="openCloud()">← Back</button>
+  `);
+}
+async function doCloudRestore(which){
+  if(!confirm('Restore this version? It replaces your current data on this device.'))return;
+  try{
+    const base=cloudBase();
+    const u = which==='latest' ? base+'/state' : base+'/backup?date='+encodeURIComponent(which);
+    const r=await fetch(u,{headers:cloudHeaders()});
+    const d=await r.json();
+    if(!d.state){ return toast('That version is empty'); }
+    S={...clone(DEFAULT),...d.state}; S.updatedAt=Date.now();
+    localStorage.setItem(LS,JSON.stringify(S)); render(); closeSheet();
+    toast('Restored ✓'); cloudPush();
+  }catch(e){ toast('Restore failed'); }
 }
 /* turn a bank text (or structured item) into an income/expense entry */
 function parseSms(raw){
@@ -1208,8 +1243,10 @@ function openCloud(){
    <label class="f">Secret key</label>
    <input id="clKey" type="text" placeholder="your secret key" value="${esc(S.settings.cloudKey||'')}">
    <button class="btn" onclick="saveCloud()">Connect &amp; sync now</button>
-   ${on?`<button class="btn ghost" onclick="syncCloud({manual:true})">🔄 Sync now</button><button class="btn ghost" onclick="disconnectCloud()">Disconnect</button>`:''}
-   <p class="hint">Enter the address &amp; key I give you after deploying the server. Your Shortcut uses the same two values.</p>
+   ${on?`<button class="btn ghost" onclick="syncCloud({manual:true})">🔄 Sync now</button>
+   <button class="btn ghost" onclick="openCloudRestore()">⤵️ Restore data from Cloudflare</button>
+   <button class="btn ghost" onclick="disconnectCloud()">Disconnect</button>
+   <p class="hint">☁️ A dated backup is saved to Cloudflare automatically every day (last 30 kept). Use <b>Restore</b> to roll back to any day or move your data to a new phone.</p>`:'<p class="hint">Enter the address &amp; key I give you after deploying the server. Your Shortcut uses the same two values.</p>'}
   `);
 }
 function saveCloud(){
