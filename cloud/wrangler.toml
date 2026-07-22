@@ -1,0 +1,9 @@
+name = "my-money-sync"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+workers_dev = true
+
+# KV namespace id is filled in automatically during deploy setup
+kv_namespaces = [
+  { binding = "STORE", id = "PLACEHOLDER_KV_ID" }
+]

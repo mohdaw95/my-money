@@ -166,6 +166,10 @@
   <div class="sec"><h3>🚗 Cars</h3><a onclick="openCarAdd()">+ Add car</a></div>
   <div class="list" id="carsList"></div>
 
+  <!-- EXPENSES BY CATEGORY -->
+  <div class="sec"><h3>🧾 Expenses</h3><a onclick="openExpenses()">By category ›</a></div>
+  <div class="prsum" id="expSummary"></div>
+
   <!-- PAYABLE / RECEIVABLE -->
   <div class="sec"><h3>🤝 Payable / Receivable</h3><a onclick="openPR()">+ Add</a></div>
   <div class="prsum" id="prSummary"></div>
@@ -194,7 +198,9 @@ const ACCTS=[
 function acct(k){ return ACCTS.find(a=>a.key===k); }
 const DEFAULT={
   settings:{ rateJODtoQAR:5.13, rateAEDtoQAR:0.9942, rateUSDtoQAR:3.64,
-             gold21kJOD:47, goldUpdated:null, fxUpdated:null, liraGrams:8, lastBackup:null },
+             gold21kJOD:47, goldUpdated:null, fxUpdated:null, liraGrams:8, lastBackup:null,
+             cloudUrl:'', cloudKey:'', lastSync:null },
+  updatedAt:0,
   accounts:{ qDebit:0, qCredit:0, jDebit:0 },
   gold:[], cars:[], pr:[], txns:[], salary:null
 };
@@ -223,7 +229,9 @@ function num(v){
 }
 let S = load();
 function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)); if(d){ return migrate({...clone(DEFAULT),...d, settings:{...DEFAULT.settings,...(d.settings||{})}, accounts:{...DEFAULT.accounts,...(d.accounts||{})}}); } }catch(e){} return clone(DEFAULT); }
-function save(){ localStorage.setItem(LS, JSON.stringify(S)); render(); }
+function save(){ S.updatedAt=Date.now(); localStorage.setItem(LS, JSON.stringify(S)); render(); cloudPushSoon(); }
+let _pushT=null;
+function cloudPushSoon(){ if(!S.settings.cloudUrl)return; clearTimeout(_pushT); _pushT=setTimeout(()=>cloudPush(),1500); }
 function uid(){ return 'i'+Math.random().toString(36).slice(2,9); }
 
 /* ---------------- MONEY HELPERS ---------------- */
@@ -305,6 +313,14 @@ function render(){
         <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editCar('${c.id}')">Edit</button><button class="del" onclick="delCar('${c.id}')">Delete</button></div>
       </div>
     </div>`).join('') : `<div class="empty">No cars yet. Add one or log a car revenue.</div>`;
+
+  // expenses summary — top categories
+  const exps=S.txns.filter(x=>x.dir<0);
+  if(exps.length){
+    const g={}; exps.forEach(x=>{ const c=expenseCat(x); g[c]=(g[c]||0)+toQAR(x.amount,x.currency); });
+    const top=Object.entries(g).sort((a,b)=>b[1]-a[1]).slice(0,3);
+    document.getElementById('expSummary').innerHTML = top.map(([c,v])=>`<div class="prcard tap" onclick="openExpenses()"><div class="k">${esc(c)}</div><div class="v neg">${fmt(v,'QAR')}</div><div class="more">details ›</div></div>`).join('');
+  } else { document.getElementById('expSummary').innerHTML=''; }
 
   // payable/receivable — statement summary (receivable, payable, and net)
   document.getElementById('prSummary').innerHTML=`
@@ -438,6 +454,7 @@ function saveExpense(){
   if(!amount||amount<=0)return toast('Enter an amount');
   const eff=withdraw(acc,amount,cur);
   log('🧾',det||cat,cat+' · '+accName(acc),amount,cur,-1,date,[eff],{kind:'expense',account:acc,detail:det||cat});
+  S.txns[S.txns.length-1].cat=cat;
   save(); closeSheet(); toast('Expense saved');
 }
 
@@ -959,6 +976,7 @@ function openSettings(){
    <label class="f">1 gold lira = ? grams</label><input id="stLira" type="number" step="0.01" value="${S.settings.liraGrams}">
    <button class="btn" onclick="saveSettings()">Save settings</button>
    <button class="btn ghost" onclick="refreshFX().then(()=>{openSettings();toast('Rates refreshed')})">↻ Refresh live FX</button>
+   <button class="btn ghost" onclick="openCloud()">☁️ Cloud sync ${cloudBase()?'· on':''}</button>
    <button class="btn ghost" onclick="openBackup()">💾 Backup &amp; restore</button>
   `);
 }
@@ -1020,10 +1038,112 @@ function importFile(input){
 }
 function wipe(){ if(confirm('Erase ALL data? This cannot be undone.')){ S=clone(DEFAULT); save(); closeSheet(); toast('Erased'); } }
 
+/* ---------------- CLOUD SYNC + BANK SMS INBOX ---------------- */
+function cloudBase(){ return (S.settings.cloudUrl||'').replace(/\/+$/,''); }
+function cloudHeaders(){ return {'Content-Type':'application/json','Authorization':'Bearer '+(S.settings.cloudKey||'')}; }
+async function cloudPush(){
+  if(!cloudBase())return;
+  try{ S.updatedAt=Date.now(); const r=await fetch(cloudBase()+'/state',{method:'PUT',headers:cloudHeaders(),body:JSON.stringify(S)});
+       if(r.ok){ S.settings.lastSync=Date.now(); localStorage.setItem(LS,JSON.stringify(S)); } }catch(e){}
+}
+/* pull newer state, drain bank-SMS inbox, push merged state */
+async function syncCloud(opts){
+  opts=opts||{}; if(!cloudBase()){ if(opts.manual)toast('Not connected'); return; }
+  const base=cloudBase();
+  try{
+    const r=await fetch(base+'/state',{headers:cloudHeaders()});
+    if(r.status===401){ if(opts.manual)toast('Wrong secret key'); return; }
+    const d=await r.json();
+    if(d.state && (d.updatedAt||0) > (S.updatedAt||0)){        // remote is newer → adopt
+      S={...clone(DEFAULT),...d.state}; localStorage.setItem(LS,JSON.stringify(S)); render();
+    }
+    const ri=await fetch(base+'/inbox',{headers:cloudHeaders()});
+    const di=await ri.json(); const items=di.inbox||[]; let applied=0;
+    items.forEach(it=>{ if(applyInboxItem(it))applied++; });
+    if(items.length){ try{ await fetch(base+'/inbox',{method:'DELETE',headers:cloudHeaders()}); }catch(e){} }
+    if(applied){ localStorage.setItem(LS,JSON.stringify(S)); render(); toast(applied+' bank update'+(applied>1?'s':'')+' added'); }
+    await cloudPush();
+    S.settings.lastSync=Date.now(); localStorage.setItem(LS,JSON.stringify(S));
+    if(opts.manual)toast('Synced ✓');
+  }catch(e){ if(opts.manual)toast('Sync failed — check the address'); }
+}
+/* turn a bank text (or structured item) into an income/expense entry */
+function parseSms(raw){
+  raw=(''+(raw||''));
+  const norm=raw.replace(/[٠-٩]/g,d=>d.charCodeAt(0)-0x0660);
+  const m=norm.match(/(\d[\d,]*\.?\d+|\d[\d,]*)/);
+  const amount=m?num(m[1]):NaN;
+  const credit=/credit|deposit|received|salary|refund|added|reversal|إيداع|اضاف|راتب|استلام|مستلم/i.test(raw);
+  const debit=/debit|purchase|withdraw|spent|deducted|payment|pos|paid|شراء|سحب|خصم|دفع|مشترى/i.test(raw);
+  const type = (credit && !debit) ? 'income' : 'expense';
+  return {amount,type};
+}
+function applyInboxItem(it){
+  const p=parseSms(it.raw);
+  const amount=(it.amount!=null && it.amount!=='')?num(it.amount):p.amount;
+  if(!amount||amount<=0)return false;
+  const type=it.type||p.type||'expense';
+  const acc=it.account||'qDebit';
+  const cur=accCurrency(acc);
+  const det=(it.detail&&it.detail.trim())||(it.raw?(''+it.raw).slice(0,70):'Bank SMS');
+  const date=it.date||today();
+  if(type==='income'){
+    const eff=deposit(acc,amount,cur);
+    log('📩',det,'Bank SMS → '+accName(acc),amount,cur,1,date,[eff],{kind:'income',account:acc,detail:det});
+  }else{
+    const eff=withdraw(acc,amount,cur);
+    log('📩',det,'Bank SMS · '+accName(acc),amount,cur,-1,date,[eff],{kind:'expense',account:acc,detail:det});
+    S.txns[S.txns.length-1].cat=it.category||'Bank SMS';
+  }
+  return true;
+}
+function openCloud(){
+  const on=!!cloudBase();
+  openSheet(`
+   <h2>☁️ Cloud sync</h2>
+   <p class="hint" style="margin-top:0">Auto-saves your data online and pulls in bank-SMS updates from your phone Shortcut. ${on?'<b style="color:var(--green)">Connected.</b> Last sync '+(S.settings.lastSync?timeAgo(S.settings.lastSync):'never')+'.':'Not connected yet.'}</p>
+   <label class="f">Server address</label>
+   <input id="clUrl" type="url" inputmode="url" placeholder="https://my-money-sync.xxxx.workers.dev" value="${esc(S.settings.cloudUrl||'')}">
+   <label class="f">Secret key</label>
+   <input id="clKey" type="text" placeholder="your secret key" value="${esc(S.settings.cloudKey||'')}">
+   <button class="btn" onclick="saveCloud()">Connect &amp; sync now</button>
+   ${on?`<button class="btn ghost" onclick="syncCloud({manual:true})">🔄 Sync now</button><button class="btn ghost" onclick="disconnectCloud()">Disconnect</button>`:''}
+   <p class="hint">Enter the address &amp; key I give you after deploying the server. Your Shortcut uses the same two values.</p>
+  `);
+}
+function saveCloud(){
+  S.settings.cloudUrl=document.getElementById('clUrl').value.trim();
+  S.settings.cloudKey=document.getElementById('clKey').value.trim();
+  localStorage.setItem(LS,JSON.stringify(S)); closeSheet(); toast('Connecting…'); syncCloud({manual:true});
+}
+function disconnectCloud(){ S.settings.cloudUrl=''; S.settings.cloudKey=''; localStorage.setItem(LS,JSON.stringify(S)); closeSheet(); toast('Disconnected'); }
+
+/* ---------------- EXPENSES BY CATEGORY ---------------- */
+function expenseCat(x){ return x.cat || (x.sub? (''+x.sub).split(' · ')[0] : 'Other') || 'Other'; }
+function sumQAR(arr){ return arr.reduce((s,x)=>s+toQAR(x.amount,x.currency),0); }
+function openExpenses(){
+  const exps=S.txns.filter(x=>x.dir<0);
+  const groups={}; exps.forEach(x=>{ const c=expenseCat(x); (groups[c]=groups[c]||[]).push(x); });
+  const cats=Object.keys(groups).sort((a,b)=>sumQAR(groups[b])-sumQAR(groups[a]));
+  openSheet(`
+   <h2>🧾 Expenses by category</h2>
+   <div class="kv"><span style="font-weight:800">Total spent</span><span style="font-weight:800;color:var(--red)">${fmt(sumQAR(exps),'QAR')}</span></div>
+   ${cats.length? cats.map(c=>`
+     <div class="kv" style="margin-top:8px;border-bottom:2px solid var(--line)"><span style="font-weight:700">${esc(c)}</span><span style="font-weight:700;color:var(--red)">${fmt(sumQAR(groups[c]),'QAR')}</span></div>
+     <div class="list" style="margin-top:6px">${groups[c].map(x=>`
+       <div class="item"><div class="em">${x.emoji}</div><div class="mid"><div class="t">${esc(x.title)}</div>
+       <div class="s">${x.edit&&x.edit.account?accName(x.edit.account)+' · ':''}${fmtDate(x.date)}</div></div>
+       <div style="text-align:right"><div class="amt neg">${fmt(x.amount,x.currency)}</div>
+       <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editTxn('${x.id}')">Edit</button><button class="del" onclick="delTxn('${x.id}')">Del</button></div></div></div>`).join('')}</div>`).join('')
+     : '<div class="empty">No expenses yet. They appear here (grouped by category) as you add them or as bank SMS come in.</div>'}
+  `);
+}
+
 /* ---------------- INIT ---------------- */
 runAutoSalary();          // add this month's salary automatically if due
 render();
 refreshFX();              // silent live FX on open
+syncCloud();              // pull cloud state + bank-SMS inbox on open (if connected)
 // Auto gold refresh once per day
 (function(){ const last=S.settings.goldUpdated||0; if(Date.now()-last>20*60*60*1000){ /* attempt quietly */
   fetch('https://api.gold-api.com/price/XAU').then(r=>r.json()).then(j=>{ if(j&&j.price){
