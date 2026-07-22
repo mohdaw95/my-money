@@ -302,6 +302,7 @@ function render(){
   const goldPL = t.goldQAR - S.gold.reduce((s,g)=>s+toQAR(g.buyJOD,'JOD'),0);
   const cmRev = S.cars.filter(c=>(c.date||'').slice(0,7)===curMonth()).reduce((s,c)=>s+carRev(c),0);
   const cmCount = S.cars.filter(c=>(c.date||'').slice(0,7)===curMonth()).length;
+  const cmExp = S.txns.filter(x=>x.dir<0 && (x.date||'').slice(0,7)===curMonth()).reduce((s,x)=>s+toQAR(x.amount,x.currency),0);
   document.getElementById('cards').innerHTML=
     ACCTS.map(a=>{ const bal=S.accounts[a.key]||0; return `
     <div class="acard tap" onclick="openAccount('${a.key}')">
@@ -323,6 +324,11 @@ function render(){
       <div class="ic">📤</div><div class="nm">Rev from cars</div>
       <div class="bal">${fmt(cmRev,'QAR')}</div>
       <div class="sub">${monthLabel(curMonth())} · ${cmCount} car${cmCount!==1?'s':''}</div>
+    </div>
+    <div class="acard tap" onclick="openExpMonths()">
+      <div class="ic">🧾</div><div class="nm">This month exp</div>
+      <div class="bal">${fmt(cmExp,'QAR')}</div>
+      <div class="sub">${monthLabel(curMonth())}</div>
     </div>`;
 
   // cars list
@@ -786,11 +792,21 @@ function saveCarRates(){
 }
 function editCarRevValue(id,mo){
   const c=S.cars.find(x=>x.id===id); if(!c)return;
-  const v=prompt('Revenue for '+(c.detail||'this car')+' (QAR)\nLeave blank to use the '+c.country+' rate:', carRev(c));
-  if(v===null)return;
-  if(v.trim()===''){ delete c.rev; } else { const n=num(v); if(isNaN(n))return toast('Invalid'); c.rev=n; }
-  save(); openCarRevMonth(mo); toast('Updated');
+  openSheet(`
+   <h2>✎ Car revenue</h2>
+   <div class="kv"><span>${esc(c.detail||'Car')} <span class="badge ${c.country==='UAE'?'uae':'qa'}">${c.country}</span></span><span>rate ${fmt(carRate(c.country),'QAR')}</span></div>
+   <label class="f">Revenue for this car (QAR)</label>
+   <input id="carRevIn" type="text" inputmode="decimal" value="${c.rev!=null&&c.rev!==''?c.rev:carRev(c)}">
+   <button class="btn" onclick="saveCarRevValue('${id}','${mo}')">Save</button>
+   <button class="btn ghost" onclick="resetCarRevValue('${id}','${mo}')">↺ Use ${c.country} rate (${fmt(carRate(c.country),'QAR')})</button>
+  `);
 }
+function saveCarRevValue(id,mo){
+  const c=S.cars.find(x=>x.id===id); if(!c)return;
+  const n=num(document.getElementById('carRevIn').value); if(isNaN(n))return toast('Enter a number');
+  c.rev=n; save(); openCarRevMonth(mo); toast('Revenue updated');
+}
+function resetCarRevValue(id,mo){ const c=S.cars.find(x=>x.id===id); if(c){ delete c.rev; save(); } openCarRevMonth(mo); toast('Reset to rate'); }
 
 /* ---------------- GOLD ---------------- */
 function openGold(){
@@ -879,8 +895,15 @@ function saveEditGold(id){
   _gu='g'; save(); openGold(); toast('Updated');
 }
 function editGoldPrice(){
-  const v=prompt('Current 21k gold price in Jordan (JOD per gram):', S.settings.gold21kJOD);
-  if(v===null)return; const n=num(v); if(!n||n<=0)return toast('Invalid');
+  openSheet(`
+   <h2>✎ 21k gold price</h2>
+   <label class="f">Current 21k price in Jordan (JOD / gram)</label>
+   <input id="goldPriceIn" type="text" inputmode="decimal" value="${S.settings.gold21kJOD}">
+   <button class="btn gold" onclick="saveGoldPrice()">Save price</button>
+  `);
+}
+function saveGoldPrice(){
+  const n=num(document.getElementById('goldPriceIn').value); if(!n||n<=0)return toast('Enter a valid price');
   S.settings.gold21kJOD=n; S.settings.goldUpdated=Date.now(); save(); openGold(); toast('Price updated');
 }
 
@@ -1274,6 +1297,44 @@ function openExpenses(){
        <div style="text-align:right"><div class="amt neg">${fmt(x.amount,x.currency)}</div>
        <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editTxn('${x.id}')">Edit</button><button class="del" onclick="delTxn('${x.id}')">Del</button></div></div></div>`).join('')}</div>`).join('')
      : '<div class="empty">No expenses yet. They appear here (grouped by category) as you add them or as bank SMS come in.</div>'}
+  `);
+}
+/* This month exp card → months → categories for the chosen month */
+function expByMonth(){
+  const m={};
+  S.txns.filter(x=>x.dir<0).forEach(x=>{ const mo=(x.date||today()).slice(0,7); if(!m[mo])m[mo]={total:0,items:[]}; m[mo].total+=toQAR(x.amount,x.currency); m[mo].items.push(x); });
+  return m;
+}
+function openExpMonths(){
+  const byM=expByMonth(); const months=Object.keys(byM).sort().reverse();
+  const grand=months.reduce((s,mo)=>s+byM[mo].total,0);
+  openSheet(`
+   <h2>🧾 Expenses by month</h2>
+   <div class="kv"><span style="font-weight:800">All-time spent</span><span style="font-weight:800;color:var(--red)">${fmt(grand,'QAR')}</span></div>
+   <div class="list" style="margin-top:10px">${months.length? months.map(mo=>`
+     <div class="item tap" onclick="openExpMonth('${mo}')"><div class="em">📅</div>
+     <div class="mid"><div class="t">${monthLabel(mo)}${mo===curMonth()?' <span class="badge paid">this month</span>':''}</div>
+     <div class="s">${byM[mo].items.length} item${byM[mo].items.length!==1?'s':''}</div></div>
+     <div style="text-align:right"><div class="amt neg">${fmt(byM[mo].total,'QAR')}</div><div class="s" style="color:var(--accent)">view ›</div></div></div>`).join('')
+     : '<div class="empty">No expenses yet.</div>'}</div>
+  `);
+}
+function openExpMonth(mo){
+  const items=S.txns.filter(x=>x.dir<0 && (x.date||'').slice(0,7)===mo);
+  const groups={}; items.forEach(x=>{ const c=expenseCat(x); (groups[c]=groups[c]||[]).push(x); });
+  const cats=Object.keys(groups).sort((a,b)=>sumQAR(groups[b])-sumQAR(groups[a]));
+  openSheet(`
+   <h2>🧾 ${monthLabel(mo)}</h2>
+   <div class="kv"><span style="font-weight:800">Total spent</span><span style="font-weight:800;color:var(--red)">${fmt(sumQAR(items),'QAR')}</span></div>
+   ${cats.length? cats.map(c=>`
+     <div class="kv" style="margin-top:8px;border-bottom:2px solid var(--line)"><span style="font-weight:700">${esc(c)}</span><span style="font-weight:700;color:var(--red)">${fmt(sumQAR(groups[c]),'QAR')}</span></div>
+     <div class="list" style="margin-top:6px">${groups[c].map(x=>`
+       <div class="item"><div class="em">${x.emoji}</div><div class="mid"><div class="t">${esc(x.title)}</div>
+       <div class="s">${x.edit&&x.edit.account?accName(x.edit.account)+' · ':''}${fmtDate(x.date)}</div></div>
+       <div style="text-align:right"><div class="amt neg">${fmt(x.amount,x.currency)}</div>
+       <button class="del" style="color:var(--accent)" onclick="editTxn('${x.id}')">Edit</button></div></div>`).join('')}</div>`).join('')
+     : '<div class="empty">No expenses this month.</div>'}
+   <button class="btn ghost" onclick="openExpMonths()">← All months</button>
   `);
 }
 
