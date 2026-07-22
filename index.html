@@ -165,6 +165,7 @@
   <!-- CARS -->
   <div class="sec"><h3>🚗 Cars</h3><a onclick="openCarAdd()">+ Add car</a></div>
   <div class="list" id="carsList"></div>
+  <button class="btn" id="waBtn" style="background:#25D366;color:#062e16;display:none" onclick="shareCarsWhatsApp()">🟢 Send cars summary on WhatsApp</button>
 
   <!-- EXPENSES BY CATEGORY -->
   <div class="sec"><h3>🧾 Expenses</h3><a onclick="openExpenses()">By category ›</a></div>
@@ -359,6 +360,7 @@ function render(){
         <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editCar('${c.id}')">Edit</button><button class="del" onclick="delCar('${c.id}')">Delete</button></div>
       </div>
     </div>`).join('') : `<div class="empty">No cars yet. Add one or log a car revenue.</div>`;
+  document.getElementById('waBtn').style.display = S.cars.some(c=>c.status==='receivable')?'block':'none';
 
   // expenses summary — top categories
   const exps=S.txns.filter(x=>x.dir<0);
@@ -663,15 +665,29 @@ function saveEditPR(id){
 function openCarAdd(){
   openSheet(`
    <h2>🚗 Add car (receivable)</h2>
+   <label class="f">Title</label><input id="carDet" placeholder="e.g. Cross Syrian">
    <label class="f">Country</label>
    <div class="seg"><button id="cq-Qatar" class="on" onclick="carC('Qatar')">🇶🇦 Qatar</button><button id="cq-UAE" onclick="carC('UAE')">🇦🇪 UAE</button></div>
-   <label class="f">Amount</label>
+   <label class="f">Receivable amount</label>
    <div class="amtrow"><input id="carAmt" type="text" inputmode="decimal" placeholder="0.00"><select id="carCur">${curOptions('QAR')}</select></div>
-   <label class="f">Detail</label><input id="carDet" placeholder="e.g. Nissan Patrol 2019">
+   ${carExtraFields({})}
    ${dateField('carDate')}
    <button class="btn" onclick="saveCar()">Save as receivable</button>
   `);
   window._carC='Qatar';
+}
+/* optional per-car breakdown fields (shown in the WhatsApp summary when filled) */
+function carExtraFields(c){ return `
+   <label class="f">Deposit (optional)</label><input id="carDep" type="text" inputmode="decimal" value="${c.deposit!=null?c.deposit:''}" placeholder="—">
+   <label class="f">Commission (optional)</label><input id="carComm" type="text" inputmode="decimal" value="${c.commission!=null?c.commission:''}" placeholder="—">
+   <label class="f">Inspection (optional)</label><input id="carInsp" type="text" inputmode="decimal" value="${c.inspection!=null?c.inspection:''}" placeholder="—">
+   <label class="f">Transfer (optional)</label><input id="carTrans" type="text" inputmode="decimal" value="${c.transfer!=null?c.transfer:''}" placeholder="—">`;
+}
+function readCarExtras(c){
+  [['carDep','deposit'],['carComm','commission'],['carInsp','inspection'],['carTrans','transfer']].forEach(([id,f])=>{
+    const el=document.getElementById(id); if(!el)return;
+    const raw=el.value.trim(); if(raw===''){ delete c[f]; } else { const n=num(raw); if(!isNaN(n)) c[f]=n; }
+  });
 }
 function carC(c){ window._carC=c; document.getElementById('cq-Qatar').classList.toggle('on',c==='Qatar'); document.getElementById('cq-UAE').classList.toggle('on',c==='UAE'); }
 function saveCar(){
@@ -681,6 +697,7 @@ function saveCar(){
   const date=document.getElementById('carDate').value||today();
   if(!amount||amount<=0)return toast('Enter an amount');
   const c={id:uid(),amount,currency:cur,country:window._carC,status:'receivable',detail:det,date};
+  readCarExtras(c);
   S.cars.push(c); carTxnSync(c);
   save(); closeSheet(); toast('Car added');
 }
@@ -709,9 +726,10 @@ function editCar(id){
    <h2>✎ Edit car</h2>
    <label class="f">Country</label>
    <div class="seg"><button id="cq-Qatar" class="${c.country==='Qatar'?'on':''}" onclick="carC('Qatar')">🇶🇦 Qatar</button><button id="cq-UAE" class="${c.country==='UAE'?'on':''}" onclick="carC('UAE')">🇦🇪 UAE</button></div>
-   <label class="f">Amount</label>
+   <label class="f">Title</label><input id="carDet" value="${esc(c.detail||'')}">
+   <label class="f">Receivable amount</label>
    <div class="amtrow"><input id="carAmt" type="text" inputmode="decimal" value="${c.amount}"><select id="carCur">${curOptions(c.currency)}</select></div>
-   <label class="f">Detail</label><input id="carDet" value="${esc(c.detail||'')}">
+   ${carExtraFields(c)}
    <label class="f">Date</label><input type="date" id="carDate" value="${c.date}">
    ${c.status==='paid'?`<label class="f">Paid into account</label><select id="carAcc">${accountOptions(c.account)}</select>`:''}
    <button class="btn" onclick="saveEditCar('${id}')">Save changes</button>
@@ -730,6 +748,7 @@ function saveEditCar(id){
     c.effect=deposit(acc,amount,cur); c.account=acc;
   }
   Object.assign(c,{amount,currency:cur,detail:det,date,country:window._carC});
+  readCarExtras(c);
   carTxnSync(c);                               // keep the linked activity note in sync
   save(); closeSheet(); render(); toast('Updated');
 }
@@ -752,6 +771,36 @@ function delCar(id){
   if(c.status==='paid') reverseEffects([c.effect]);
   carTxnRemove(id);                            // also remove the linked activity note
   S.cars=S.cars.filter(x=>x.id!==id); save(); closeSheet(); render(); toast('Deleted');
+}
+/* build the cars summary text (skips fields with no value) */
+function carSummaryText(){
+  const cars=S.cars.filter(c=>c.status==='receivable');
+  if(!cars.length) return '';
+  const L=[]; L.push('*Cars — Receivable Summary*','');
+  cars.forEach((c,i)=>{
+    const cur=c.currency||'QAR';
+    L.push('*Car '+(i+1)+': '+(c.detail||'Car')+'*');
+    L.push('Country: '+c.country);
+    const add=(label,v)=>{ if(v!=null && v!=='' && !isNaN(+v)) L.push(label+': '+fmt(+v,cur)); };
+    add('Deposit',c.deposit);
+    add('Commission',c.commission);
+    add('Inspection',c.inspection);
+    add('Transfer',c.transfer);
+    add('Receivable',c.amount);
+    L.push('');
+  });
+  const total=cars.reduce((s,c)=>s+toQAR(c.amount||0,c.currency||'QAR'),0);
+  L.push('*Total Receivable: '+fmt(total,'QAR')+'*');
+  return L.join('\n');
+}
+function shareCarsWhatsApp(){
+  const text=carSummaryText();
+  if(!text) return toast('No receivable cars to send');
+  navigator.clipboard?.writeText(text).catch(()=>{});   // also copy, just in case
+  const a=document.createElement('a');
+  a.href='https://wa.me/?text='+encodeURIComponent(text);
+  a.target='_blank'; a.rel='noopener';
+  document.body.appendChild(a); a.click(); a.remove();
 }
 
 /* ---------------- CAR EXPORT REVENUE ---------------- */
