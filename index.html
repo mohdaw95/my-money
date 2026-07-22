@@ -207,6 +207,15 @@ function routeAccount(raw, fallback){
   for(const r of SMS_ROUTES){ if(low.includes(r.match)) return r.acc; }
   return fallback || 'qDebit';
 }
+/* revenue earned per exported car, by country (QAR) */
+const CAR_REV={ UAE:850, Qatar:1000 };
+function carRev(c){ return CAR_REV[c.country]||0; }
+function carRevByMonth(){
+  const m={};
+  S.cars.forEach(c=>{ const mo=(c.date||today()).slice(0,7); if(!m[mo])m[mo]={total:0,count:0,cars:[]}; m[mo].total+=carRev(c); m[mo].count++; m[mo].cars.push(c); });
+  return m;
+}
+function monthLabel(mo){ const p=mo.split('-'); const d=new Date(+p[0],+p[1]-1,1); return d.toLocaleDateString('en',{month:'long',year:'numeric'}); }
 function acct(k){ return ACCTS.find(a=>a.key===k); }
 const DEFAULT={
   settings:{ rateJODtoQAR:5.13, rateAEDtoQAR:0.9942, rateUSDtoQAR:3.64,
@@ -291,6 +300,8 @@ function render(){
   // account cards
   const grams=t.grams;
   const goldPL = t.goldQAR - S.gold.reduce((s,g)=>s+toQAR(g.buyJOD,'JOD'),0);
+  const cmRev = S.cars.filter(c=>(c.date||'').slice(0,7)===curMonth()).reduce((s,c)=>s+carRev(c),0);
+  const cmCount = S.cars.filter(c=>(c.date||'').slice(0,7)===curMonth()).length;
   document.getElementById('cards').innerHTML=
     ACCTS.map(a=>{ const bal=S.accounts[a.key]||0; return `
     <div class="acard tap" onclick="openAccount('${a.key}')">
@@ -307,6 +318,11 @@ function render(){
       <div class="ic">🚗</div><div class="nm">Cars receivable</div>
       <div class="bal">${fmt(t.carsRecvQAR,'QAR')}</div>
       <div class="sub">≈ ${fmt(fromQAR(t.carsRecvQAR,'JOD'),'JOD')} · ${S.cars.filter(c=>c.status==='receivable').length} pending</div>
+    </div>
+    <div class="acard tap" onclick="openCarRev()">
+      <div class="ic">📤</div><div class="nm">Rev from cars</div>
+      <div class="bal">${fmt(cmRev,'QAR')}</div>
+      <div class="sub">${monthLabel(curMonth())} · ${cmCount} car${cmCount!==1?'s':''}</div>
     </div>`;
 
   // cars list
@@ -718,6 +734,38 @@ function delCar(id){
   if(c.status==='paid') reverseEffects([c.effect]);
   carTxnRemove(id);                            // also remove the linked activity note
   S.cars=S.cars.filter(x=>x.id!==id); save(); closeSheet(); render(); toast('Deleted');
+}
+
+/* ---------------- CAR EXPORT REVENUE ---------------- */
+function openCarRev(){
+  const byM=carRevByMonth();
+  const months=Object.keys(byM).sort().reverse();
+  const grand=months.reduce((s,mo)=>s+byM[mo].total,0);
+  openSheet(`
+   <h2>📤 Revenue from cars</h2>
+   <p class="hint" style="margin-top:0">Each exported car earns: 🇦🇪 UAE ${fmt(CAR_REV.UAE,'QAR')} · 🇶🇦 Qatar ${fmt(CAR_REV.Qatar,'QAR')}. Tap a month to see its cars.</p>
+   <div class="kv"><span style="font-weight:800">All-time total</span><span style="font-weight:800;color:var(--green)">${fmt(grand,'QAR')}</span></div>
+   <div class="list" style="margin-top:10px">${months.length? months.map(mo=>`
+     <div class="item tap" onclick="openCarRevMonth('${mo}')"><div class="em">📅</div>
+     <div class="mid"><div class="t">${monthLabel(mo)}${mo===curMonth()?' <span class="badge paid">this month</span>':''}</div>
+     <div class="s">${byM[mo].count} car${byM[mo].count!==1?'s':''}</div></div>
+     <div style="text-align:right"><div class="amt pos">${fmt(byM[mo].total,'QAR')}</div><div class="s" style="color:var(--accent)">view ›</div></div></div>`).join('')
+     : '<div class="empty">No cars yet — add cars and their monthly revenue appears here.</div>'}</div>
+  `);
+}
+function openCarRevMonth(mo){
+  const g=carRevByMonth()[mo]||{total:0,count:0,cars:[]};
+  openSheet(`
+   <h2>📤 ${monthLabel(mo)}</h2>
+   <div class="kv"><span style="font-weight:800">Revenue this month</span><span style="font-weight:800;color:var(--green)">${fmt(g.total,'QAR')}</span></div>
+   <div class="kv"><span>Cars exported</span><span>${g.count}</span></div>
+   <div class="list" style="margin-top:12px">${g.cars.map(c=>`
+     <div class="item"><div class="em">🚗</div><div class="mid">
+       <div class="t">${esc(c.detail||'Car')} <span class="badge ${c.country==='UAE'?'uae':'qa'}">${c.country}</span></div>
+       <div class="s">${c.status==='receivable'?'Receivable':'Paid'} · ${fmtDate(c.date)}</div></div>
+       <div class="amt pos">${fmt(carRev(c),'QAR')}</div></div>`).join('')}</div>
+   <button class="btn ghost" onclick="openCarRev()">← All months</button>
+  `);
 }
 
 /* ---------------- GOLD ---------------- */
