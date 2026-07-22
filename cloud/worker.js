@@ -62,10 +62,11 @@ export default {
       }
       const list = JSON.parse((await env.STORE.get('inbox')) || '[]');
       list.push({
-        type: item.type || 'income',
-        amount: item.amount,
+        type: item.type || '',            // empty → the app decides debit/credit from the raw text
+        amount: item.amount != null ? item.amount : '',
         account: item.account || 'qDebit',
-        detail: item.detail || 'From bank SMS',
+        detail: item.detail || '',
+        category: item.category || '',
         date: item.date || '',
         raw: item.raw || '',
         ts: Date.now(),

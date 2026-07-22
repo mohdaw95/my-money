@@ -5,5 +5,5 @@ workers_dev = true
 
 # KV namespace id is filled in automatically during deploy setup
 kv_namespaces = [
-  { binding = "STORE", id = "PLACEHOLDER_KV_ID" }
+  { binding = "STORE", id = "3faa32b0f3b14a1f8fe151bcdd51c187" }
 ]
