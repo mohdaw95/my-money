@@ -342,7 +342,7 @@ function render(){
     <div class="acard tap" onclick="openSavings()">
       <div class="ic">🐖</div><div class="nm">Savings this month</div>
       <div class="bal" style="color:${cmSavings>=0?'var(--green)':'var(--red)'}">${fmt(cmSavings,'QAR')}</div>
-      <div class="sub">salary + car rev − exp</div>
+      <div class="sub">salary + car + rev − exp</div>
     </div>`;
 
   // cars list
@@ -1508,33 +1508,37 @@ function openExpMonth(mo){
 function salaryForMonth(mo){ const o=S.settings.salaryByMonth||{}; return (o[mo]!=null && o[mo]!=='')? (+o[mo]||0) : (+S.settings.monthlySalary||0); }
 function carRevForMonth(mo){ const g=carRevByMonth()[mo]; return g?g.total:0; }
 function expForMonth(mo){ const g=expByMonth()[mo]; return g?g.total:0; }
-function savingsForMonth(mo){ return salaryForMonth(mo)+carRevForMonth(mo)-expForMonth(mo); }
+/* revenue = income entries from the Revenue tab (and bank-SMS income), for the month */
+function revenueForMonth(mo){ return S.txns.filter(x=>x.dir>0 && x.edit && x.edit.kind==='income' && (x.date||'').slice(0,7)===mo).reduce((s,x)=>s+toQAR(x.amount,x.currency),0); }
+function savingsForMonth(mo){ return salaryForMonth(mo)+carRevForMonth(mo)+revenueForMonth(mo)-expForMonth(mo); }
 function activityMonths(){
   const s=new Set([curMonth()]);
   Object.keys(carRevByMonth()).forEach(m=>s.add(m));
   Object.keys(expByMonth()).forEach(m=>s.add(m));
   Object.keys(S.settings.salaryByMonth||{}).forEach(m=>s.add(m));
+  S.txns.filter(x=>x.dir>0 && x.edit && x.edit.kind==='income').forEach(x=>s.add((x.date||today()).slice(0,7)));
   return [...s].sort().reverse();
 }
 function openSavings(){
   const months=activityMonths();
   openSheet(`
    <h2>🐖 Savings by month</h2>
-   <div class="between" style="margin-bottom:8px"><p class="hint" style="margin:0">Savings = salary + car revenue − expenses. Salary ${fmt(+S.settings.monthlySalary||0,'QAR')}/mo.</p><a onclick="editSalaryBase()" style="color:var(--accent);font-size:12px;white-space:nowrap">✎ Salary</a></div>
+   <div class="between" style="margin-bottom:8px"><p class="hint" style="margin:0">Savings = salary + car revenue + revenue − expenses. Salary ${fmt(+S.settings.monthlySalary||0,'QAR')}/mo.</p><a onclick="editSalaryBase()" style="color:var(--accent);font-size:12px;white-space:nowrap">✎ Salary</a></div>
    <div class="list">${months.map(mo=>{ const v=savingsForMonth(mo); return `
      <div class="item tap" onclick="openSavingsMonth('${mo}')"><div class="em">📅</div>
      <div class="mid"><div class="t">${monthLabel(mo)}${mo===curMonth()?' <span class="badge paid">this month</span>':''}</div>
-     <div class="s">salary ${fmt(salaryForMonth(mo),'QAR')} · rev ${fmt(carRevForMonth(mo),'QAR')} · exp ${fmt(expForMonth(mo),'QAR')}</div></div>
+     <div class="s">sal ${fmt(salaryForMonth(mo),'QAR')} · car ${fmt(carRevForMonth(mo),'QAR')} · rev ${fmt(revenueForMonth(mo),'QAR')} · exp ${fmt(expForMonth(mo),'QAR')}</div></div>
      <div style="text-align:right"><div class="amt ${v>=0?'pos':'neg'}">${fmt(v,'QAR')}</div><div class="s" style="color:var(--accent)">view ›</div></div></div>`; }).join('')}</div>
   `);
 }
 function openSavingsMonth(mo){
-  const sal=salaryForMonth(mo), rev=carRevForMonth(mo), exp=expForMonth(mo), sav=sal+rev-exp;
+  const sal=salaryForMonth(mo), carR=carRevForMonth(mo), inc=revenueForMonth(mo), exp=expForMonth(mo), sav=sal+carR+inc-exp;
   const custom = (S.settings.salaryByMonth||{})[mo]!=null;
   openSheet(`
    <h2>🐖 ${monthLabel(mo)}</h2>
    <div class="kv"><span>💼 Salary${custom?' <span class="badge">custom</span>':''}</span><span style="color:var(--green)">+${fmt(sal,'QAR')}</span></div>
-   <div class="kv"><span>📤 Revenue from cars</span><span style="color:var(--green)">+${fmt(rev,'QAR')}</span></div>
+   <div class="kv"><span>📤 Revenue from cars</span><span style="color:var(--green)">+${fmt(carR,'QAR')}</span></div>
+   <div class="kv"><span>💰 Revenue (income)</span><span style="color:var(--green)">+${fmt(inc,'QAR')}</span></div>
    <div class="kv"><span>🧾 Expenses</span><span style="color:var(--red)">−${fmt(exp,'QAR')}</span></div>
    <div class="kv" style="border-top:2px solid var(--line);margin-top:4px"><span style="font-weight:800">Savings</span><span style="font-weight:800;color:${sav>=0?'var(--green)':'var(--red)'}">${fmt(sav,'QAR')}</span></div>
    <label class="f" style="margin-top:14px">✎ Salary for this month (QAR)</label>
