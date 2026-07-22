@@ -191,17 +191,29 @@
 const LS='myMoney_v1';
 /* the three bank cards */
 const ACCTS=[
-  {key:'qDebit',  name:'Qatar Debit',       ic:'🏦', cur:'QAR', sub:'Qatar · Debit'},
-  {key:'qCredit', name:'Qatar Credit Card', ic:'💳', cur:'QAR', sub:'Qatar · Credit card'},
-  {key:'jDebit',  name:'Jordan Debit',      ic:'🇯🇴', cur:'JOD', sub:'Jordan · Debit'},
+  {key:'qDebit',   name:'Qatar Debit',        ic:'🏦', cur:'QAR', sub:'Qatar · Debit'},
+  {key:'qCredit',  name:'Qatar Credit Card',  ic:'💳', cur:'QAR', sub:'Qatar · Credit card'},
+  {key:'qPrepaid', name:'Qatar Prepaid Card', ic:'🎫', cur:'QAR', sub:'Qatar · Prepaid'},
+  {key:'jDebit',   name:'Jordan Debit',       ic:'🇯🇴', cur:'JOD', sub:'Jordan · Debit'},
 ];
+/* route a bank SMS to the right card by an identifier found in the text */
+const SMS_ROUTES=[
+  {match:'current1', acc:'qDebit'},
+  {match:'visa2',    acc:'qCredit'},
+  {match:'visa1',    acc:'qPrepaid'},
+];
+function routeAccount(raw, fallback){
+  const low=(''+(raw||'')).toLowerCase();
+  for(const r of SMS_ROUTES){ if(low.includes(r.match)) return r.acc; }
+  return fallback || 'qDebit';
+}
 function acct(k){ return ACCTS.find(a=>a.key===k); }
 const DEFAULT={
   settings:{ rateJODtoQAR:5.13, rateAEDtoQAR:0.9942, rateUSDtoQAR:3.64,
              gold21kJOD:47, goldUpdated:null, fxUpdated:null, liraGrams:8, lastBackup:null,
              cloudUrl:'', cloudKey:'', lastSync:null },
   updatedAt:0,
-  accounts:{ qDebit:0, qCredit:0, jDebit:0 },
+  accounts:{ qDebit:0, qCredit:0, qPrepaid:0, jDebit:0 },
   gold:[], cars:[], pr:[], txns:[], salary:null
 };
 /* migrate old 2-account data (main→qDebit, jordan→jDebit) to the new 3-card model */
@@ -1070,30 +1082,47 @@ async function syncCloud(opts){
 /* turn a bank text (or structured item) into an income/expense entry */
 function parseSms(raw){
   raw=(''+(raw||''));
-  const norm=raw.replace(/[٠-٩]/g,d=>d.charCodeAt(0)-0x0660);
-  const m=norm.match(/(\d[\d,]*\.?\d+|\d[\d,]*)/);
-  const amount=m?num(m[1]):NaN;
+  const norm=raw.replace(/[٠-٩]/g,d=>d.charCodeAt(0)-0x0660).replace(/[۰-۹]/g,d=>d.charCodeAt(0)-0x06F0);
+  // available/running balance: number after a "balance"/"رصيد" keyword
+  let availBalance=NaN;
+  const bm=norm.match(/(?:available\s*balance|avail\.?\s*bal\.?|balance|bal\.?|الرصيد(?:\s*المتاح)?|رصيد)\s*[:\-]?\s*(?:QAR|JOD|AED|SAR|USD|ر\.?ق|د\.?ا)?\s*([\d,]+(?:\.\d+)?)/i);
+  if(bm) availBalance=num(bm[1]);
+  // transaction amount: prefer a number next to a currency code (avoids the "2" in VISA2 etc.)
+  let amount=NaN;
+  const am=norm.match(/(?:QAR|JOD|AED|SAR|USD|ر\.?ق|د\.?ا)\s*([\d,]+(?:\.\d+)?)/i) || norm.match(/([\d,]+(?:\.\d+)?)\s*(?:QAR|JOD|AED|SAR|USD)/i);
+  if(am) amount=num(am[1]);
+  else { const any=norm.match(/([\d,]+\.\d{1,2}|\d{2,}[\d,]*)/); if(any) amount=num(any[1]); }
   const credit=/credit|deposit|received|salary|refund|added|reversal|إيداع|اضاف|راتب|استلام|مستلم/i.test(raw);
   const debit=/debit|purchase|withdraw|spent|deducted|payment|pos|paid|شراء|سحب|خصم|دفع|مشترى/i.test(raw);
   const type = (credit && !debit) ? 'income' : 'expense';
-  return {amount,type};
+  return {amount,availBalance,type};
 }
 function applyInboxItem(it){
   const p=parseSms(it.raw);
   const amount=(it.amount!=null && it.amount!=='')?num(it.amount):p.amount;
-  if(!amount||amount<=0)return false;
-  const type=it.type||p.type||'expense';
-  const acc=it.account||'qDebit';
+  const acc=routeAccount(it.raw, it.account);       // pick the card from the identifier in the text
   const cur=accCurrency(acc);
+  const type=it.type||p.type||'expense';
   const det=(it.detail&&it.detail.trim())||(it.raw?(''+it.raw).slice(0,70):'Bank SMS');
   const date=it.date||today();
-  if(type==='income'){
-    const eff=deposit(acc,amount,cur);
-    log('📩',det,'Bank SMS → '+accName(acc),amount,cur,1,date,[eff],{kind:'income',account:acc,detail:det});
-  }else{
-    const eff=withdraw(acc,amount,cur);
-    log('📩',det,'Bank SMS · '+accName(acc),amount,cur,-1,date,[eff],{kind:'expense',account:acc,detail:det});
-    S.txns[S.txns.length-1].cat=it.category||'Bank SMS';
+  const hasAmount = amount && amount>0;
+  const hasBalance = !isNaN(p.availBalance);
+  if(!hasAmount && !hasBalance) return false;
+
+  // record the spend/deposit for the category tab (no balance effect — the bank balance is authoritative)
+  if(hasAmount){
+    if(type==='income'){
+      log('📩',det,'Bank SMS → '+accName(acc),amount,cur,1,date,null,{kind:'income',account:acc,detail:det});
+    }else{
+      log('📩',det,'Bank SMS · '+accName(acc),amount,cur,-1,date,null,{kind:'expense',account:acc,detail:det});
+      S.txns[S.txns.length-1].cat=it.category||'Bank SMS';
+    }
+  }
+  // reflect the balance: set to the bank's available balance if present, else apply the delta
+  if(hasBalance){
+    S.accounts[acc]=p.availBalance;                 // bank is the source of truth
+  }else if(hasAmount){
+    S.accounts[acc]+= (type==='income'?1:-1)*fromQAR(toQAR(amount,cur),cur);
   }
   return true;
 }
