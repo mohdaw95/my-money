@@ -207,9 +207,9 @@ function routeAccount(raw, fallback){
   for(const r of SMS_ROUTES){ if(low.includes(r.match)) return r.acc; }
   return fallback || 'qDebit';
 }
-/* revenue earned per exported car, by country (QAR) */
-const CAR_REV={ UAE:850, Qatar:1000 };
-function carRev(c){ return CAR_REV[c.country]||0; }
+/* revenue earned per exported car — editable rates in settings, plus optional per-car override (c.rev) */
+function carRate(country){ return country==='UAE' ? (+S.settings.carRevUAE||0) : (+S.settings.carRevQatar||0); }
+function carRev(c){ return (c.rev!=null && c.rev!=='') ? (+c.rev||0) : carRate(c.country); }
 function carRevByMonth(){
   const m={};
   S.cars.forEach(c=>{ const mo=(c.date||today()).slice(0,7); if(!m[mo])m[mo]={total:0,count:0,cars:[]}; m[mo].total+=carRev(c); m[mo].count++; m[mo].cars.push(c); });
@@ -220,7 +220,7 @@ function acct(k){ return ACCTS.find(a=>a.key===k); }
 const DEFAULT={
   settings:{ rateJODtoQAR:5.13, rateAEDtoQAR:0.9942, rateUSDtoQAR:3.64,
              gold21kJOD:47, goldUpdated:null, fxUpdated:null, liraGrams:8, lastBackup:null,
-             cloudUrl:'', cloudKey:'', lastSync:null },
+             cloudUrl:'', cloudKey:'', lastSync:null, carRevUAE:850, carRevQatar:1000 },
   updatedAt:0,
   accounts:{ qDebit:0, qCredit:0, qPrepaid:0, jDebit:0 },
   gold:[], cars:[], pr:[], txns:[], salary:null
@@ -743,7 +743,7 @@ function openCarRev(){
   const grand=months.reduce((s,mo)=>s+byM[mo].total,0);
   openSheet(`
    <h2>📤 Revenue from cars</h2>
-   <p class="hint" style="margin-top:0">Each exported car earns: 🇦🇪 UAE ${fmt(CAR_REV.UAE,'QAR')} · 🇶🇦 Qatar ${fmt(CAR_REV.Qatar,'QAR')}. Tap a month to see its cars.</p>
+   <div class="between" style="margin-bottom:8px"><p class="hint" style="margin:0">Each exported car earns: 🇦🇪 UAE ${fmt(S.settings.carRevUAE,'QAR')} · 🇶🇦 Qatar ${fmt(S.settings.carRevQatar,'QAR')}. Tap a month to see its cars.</p><a onclick="editCarRates()" style="color:var(--accent);font-size:12px;white-space:nowrap">✎ Rates</a></div>
    <div class="kv"><span style="font-weight:800">All-time total</span><span style="font-weight:800;color:var(--green)">${fmt(grand,'QAR')}</span></div>
    <div class="list" style="margin-top:10px">${months.length? months.map(mo=>`
      <div class="item tap" onclick="openCarRevMonth('${mo}')"><div class="em">📅</div>
@@ -761,11 +761,35 @@ function openCarRevMonth(mo){
    <div class="kv"><span>Cars exported</span><span>${g.count}</span></div>
    <div class="list" style="margin-top:12px">${g.cars.map(c=>`
      <div class="item"><div class="em">🚗</div><div class="mid">
-       <div class="t">${esc(c.detail||'Car')} <span class="badge ${c.country==='UAE'?'uae':'qa'}">${c.country}</span></div>
+       <div class="t">${esc(c.detail||'Car')} <span class="badge ${c.country==='UAE'?'uae':'qa'}">${c.country}</span>${c.rev!=null&&c.rev!==''?' <span class="badge">custom</span>':''}</div>
        <div class="s">${c.status==='receivable'?'Receivable':'Paid'} · ${fmtDate(c.date)}</div></div>
-       <div class="amt pos">${fmt(carRev(c),'QAR')}</div></div>`).join('')}</div>
+       <div style="text-align:right"><div class="amt pos">${fmt(carRev(c),'QAR')}</div>
+       <button class="del" style="color:var(--accent)" onclick="editCarRevValue('${c.id}','${mo}')">Edit</button></div></div>`).join('')}</div>
    <button class="btn ghost" onclick="openCarRev()">← All months</button>
   `);
+}
+function editCarRates(){
+  openSheet(`
+   <h2>✎ Car revenue rates</h2>
+   <label class="f">🇦🇪 UAE car (QAR)</label><input id="crUAE" type="text" inputmode="decimal" value="${S.settings.carRevUAE}">
+   <label class="f">🇶🇦 Qatar car (QAR)</label><input id="crQA" type="text" inputmode="decimal" value="${S.settings.carRevQatar}">
+   <button class="btn" onclick="saveCarRates()">Save rates</button>
+   <p class="hint">Applies to every car by country — except any car you gave a custom amount.</p>
+   <button class="btn ghost" onclick="openCarRev()">← Back</button>
+  `);
+}
+function saveCarRates(){
+  const u=num(document.getElementById('crUAE').value), q=num(document.getElementById('crQA').value);
+  if(!isNaN(u)&&u>=0)S.settings.carRevUAE=u;
+  if(!isNaN(q)&&q>=0)S.settings.carRevQatar=q;
+  save(); openCarRev(); toast('Rates updated');
+}
+function editCarRevValue(id,mo){
+  const c=S.cars.find(x=>x.id===id); if(!c)return;
+  const v=prompt('Revenue for '+(c.detail||'this car')+' (QAR)\nLeave blank to use the '+c.country+' rate:', carRev(c));
+  if(v===null)return;
+  if(v.trim()===''){ delete c.rev; } else { const n=num(v); if(isNaN(n))return toast('Invalid'); c.rev=n; }
+  save(); openCarRevMonth(mo); toast('Updated');
 }
 
 /* ---------------- GOLD ---------------- */
