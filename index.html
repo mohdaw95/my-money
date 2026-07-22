@@ -205,6 +205,8 @@ const SMS_ROUTES=[
 function routeAccount(raw, fallback){
   const low=(''+(raw||'')).toLowerCase();
   for(const r of SMS_ROUTES){ if(low.includes(r.match)) return r.acc; }
+  if(fallback && fallback!=='qDebit') return fallback;              // explicit hint wins
+  if(/\bjod\b|dinar|دينار|الاردن|الأردن/.test(low)) return 'jDebit'; // Jordan by currency/keyword
   return fallback || 'qDebit';
 }
 /* revenue earned per exported car — editable rates in settings, plus optional per-car override (c.rev) */
