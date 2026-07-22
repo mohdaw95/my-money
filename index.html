@@ -326,17 +326,17 @@ function render(){
     </div>
     <div class="acard tap" onclick="openCars()">
       <div class="ic">🚗</div><div class="nm">Cars receivable</div>
-      <div class="bal">${fmt(t.carsRecvQAR,'QAR')}</div>
+      <div class="bal" style="color:var(--green)">${fmt(t.carsRecvQAR,'QAR')}</div>
       <div class="sub">≈ ${fmt(fromQAR(t.carsRecvQAR,'JOD'),'JOD')} · ${S.cars.filter(c=>c.status==='receivable').length} pending</div>
     </div>
     <div class="acard tap" onclick="openCarRev()">
       <div class="ic">📤</div><div class="nm">Rev from cars</div>
-      <div class="bal">${fmt(cmRev,'QAR')}</div>
+      <div class="bal" style="color:var(--green)">${fmt(cmRev,'QAR')}</div>
       <div class="sub">${monthLabel(curMonth())} · ${cmCount} car${cmCount!==1?'s':''}</div>
     </div>
     <div class="acard tap" onclick="openExpMonths()">
       <div class="ic">🧾</div><div class="nm">This month exp</div>
-      <div class="bal">${fmt(cmExp,'QAR')}</div>
+      <div class="bal" style="color:var(--red)">${fmt(cmExp,'QAR')}</div>
       <div class="sub">${monthLabel(curMonth())}</div>
     </div>
     <div class="acard tap" onclick="openSavings()">
