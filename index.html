@@ -196,6 +196,7 @@ const ACCTS=[
   {key:'qCredit',  name:'Qatar Credit Card',  ic:'💳', cur:'QAR', sub:'Qatar · Credit card'},
   {key:'qPrepaid', name:'Qatar Prepaid Card', ic:'🎫', cur:'QAR', sub:'Qatar · Prepaid'},
   {key:'jDebit',   name:'Jordan Debit',       ic:'🇯🇴', cur:'JOD', sub:'Jordan · Debit'},
+  {key:'cash',     name:'Cash',               ic:'💵', cur:'QAR', sub:'Cash on hand'},
 ];
 /* route a bank SMS to the right card by an identifier found in the text */
 const SMS_ROUTES=[
@@ -228,7 +229,7 @@ const DEFAULT={
              cloudUrl:'', cloudKey:'', lastSync:null, lastCloudBackup:null, carRevUAE:850, carRevQatar:1000,
              monthlySalary:19250, salaryByMonth:{} },
   updatedAt:0,
-  accounts:{ qDebit:0, qCredit:0, qPrepaid:0, jDebit:0 },
+  accounts:{ qDebit:0, qCredit:0, qPrepaid:0, jDebit:0, cash:0 },
   gold:[], cars:[], pr:[], txns:[], salary:null, carRevEntries:[]
 };
 /* migrate old 2-account data (main→qDebit, jordan→jDebit) to the new 3-card model */
