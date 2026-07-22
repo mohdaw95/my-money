@@ -55,10 +55,15 @@ export default {
     // ---- add one transaction from the Shortcut ----
     // body: { type:"income"|"expense", amount:Number|String, account, detail, date, raw }
     if (path === '/add' && req.method === 'POST') {
+      const ct = (req.headers.get('content-type') || '').toLowerCase();
+      const q = Object.fromEntries(url.searchParams.entries());   // e.g. ?account=qDebit&category=Food
       let item;
-      try { item = await req.json(); } catch (e) {
-        // also accept ?amount=..&type=..&account=.. for simple Shortcuts
-        item = Object.fromEntries(url.searchParams.entries());
+      if (ct.includes('application/json')) {
+        try { item = { ...q, ...(await req.json()) }; } catch (e) { item = q; }
+      } else {
+        // plain-text body IS the bank message (simplest Shortcut)
+        const bodyText = await req.text();
+        item = { ...q, raw: (bodyText && bodyText.trim()) || q.raw || '' };
       }
       const list = JSON.parse((await env.STORE.get('inbox')) || '[]');
       list.push({
