@@ -214,7 +214,9 @@ function carRate(country){ return country==='UAE' ? (+S.settings.carRevUAE||0) :
 function carRev(c){ return (c.rev!=null && c.rev!=='') ? (+c.rev||0) : carRate(c.country); }
 function carRevByMonth(){
   const m={};
-  S.cars.forEach(c=>{ const mo=(c.date||today()).slice(0,7); if(!m[mo])m[mo]={total:0,count:0,cars:[]}; m[mo].total+=carRev(c); m[mo].count++; m[mo].cars.push(c); });
+  const slot=mo=>{ if(!m[mo])m[mo]={total:0,count:0,cars:[],entries:[]}; return m[mo]; };
+  S.cars.forEach(c=>{ const s=slot((c.date||today()).slice(0,7)); s.total+=carRev(c); s.count++; s.cars.push(c); });
+  (S.carRevEntries||[]).forEach(e=>{ const s=slot((e.date||today()).slice(0,7)); const rev=(+e.count||0)*carRate(e.country); s.total+=rev; s.count+=(+e.count||0); s.entries.push(e); });
   return m;
 }
 function monthLabel(mo){ const p=mo.split('-'); const d=new Date(+p[0],+p[1]-1,1); return d.toLocaleDateString('en',{month:'long',year:'numeric'}); }
@@ -226,7 +228,7 @@ const DEFAULT={
              monthlySalary:19250, salaryByMonth:{} },
   updatedAt:0,
   accounts:{ qDebit:0, qCredit:0, qPrepaid:0, jDebit:0 },
-  gold:[], cars:[], pr:[], txns:[], salary:null
+  gold:[], cars:[], pr:[], txns:[], salary:null, carRevEntries:[]
 };
 /* migrate old 2-account data (main→qDebit, jordan→jDebit) to the new 3-card model */
 function migrate(s){
@@ -303,8 +305,9 @@ function render(){
   // account cards
   const grams=t.grams;
   const goldPL = t.goldQAR - S.gold.reduce((s,g)=>s+toQAR(g.buyJOD,'JOD'),0);
-  const cmRev = S.cars.filter(c=>(c.date||'').slice(0,7)===curMonth()).reduce((s,c)=>s+carRev(c),0);
-  const cmCount = S.cars.filter(c=>(c.date||'').slice(0,7)===curMonth()).length;
+  const cmCarData = carRevByMonth()[curMonth()]||{total:0,count:0};
+  const cmRev = cmCarData.total;
+  const cmCount = cmCarData.count;
   const cmExp = S.txns.filter(x=>x.dir<0 && (x.date||'').slice(0,7)===curMonth()).reduce((s,x)=>s+toQAR(x.amount,x.currency),0);
   const cmSavings = savingsForMonth(curMonth());
   document.getElementById('cards').innerHTML=
@@ -495,8 +498,8 @@ function saveExpense(){
   const det=document.getElementById('exDet').value.trim();
   const date=document.getElementById('exDate').value||today();
   if(!amount||amount<=0)return toast('Enter an amount');
-  const eff=withdraw(acc,amount,cur);
-  log('🧾',det||cat,cat+' · '+accName(acc),amount,cur,-1,date,[eff],{kind:'expense',account:acc,detail:det||cat});
+  // expenses are tracked for budgeting only — they do NOT reduce account balances / net worth
+  log('🧾',det||cat,cat+' · '+accName(acc),amount,cur,-1,date,null,{kind:'expense',account:acc,detail:det||cat});
   S.txns[S.txns.length-1].cat=cat;
   save(); closeSheet(); toast('Expense saved');
 }
@@ -758,8 +761,9 @@ function openCarRev(){
   const grand=months.reduce((s,mo)=>s+byM[mo].total,0);
   openSheet(`
    <h2>📤 Revenue from cars</h2>
-   <div class="between" style="margin-bottom:8px"><p class="hint" style="margin:0">Each exported car earns: 🇦🇪 UAE ${fmt(S.settings.carRevUAE,'QAR')} · 🇶🇦 Qatar ${fmt(S.settings.carRevQatar,'QAR')}. Tap a month to see its cars.</p><a onclick="editCarRates()" style="color:var(--accent);font-size:12px;white-space:nowrap">✎ Rates</a></div>
-   <div class="kv"><span style="font-weight:800">All-time total</span><span style="font-weight:800;color:var(--green)">${fmt(grand,'QAR')}</span></div>
+   <div class="between" style="margin-bottom:8px"><p class="hint" style="margin:0">Each exported car earns: 🇦🇪 UAE ${fmt(S.settings.carRevUAE,'QAR')} · 🇶🇦 Qatar ${fmt(S.settings.carRevQatar,'QAR')}.</p><a onclick="editCarRates()" style="color:var(--accent);font-size:12px;white-space:nowrap">✎ Rates</a></div>
+   <button class="btn" onclick="openAddCarRev()">➕ Add revenue (by number of cars)</button>
+   <div class="kv" style="margin-top:12px"><span style="font-weight:800">All-time total</span><span style="font-weight:800;color:var(--green)">${fmt(grand,'QAR')}</span></div>
    <div class="list" style="margin-top:10px">${months.length? months.map(mo=>`
      <div class="item tap" onclick="openCarRevMonth('${mo}')"><div class="em">📅</div>
      <div class="mid"><div class="t">${monthLabel(mo)}${mo===curMonth()?' <span class="badge paid">this month</span>':''}</div>
@@ -779,7 +783,14 @@ function openCarRevMonth(mo){
        <div class="t">${esc(c.detail||'Car')} <span class="badge ${c.country==='UAE'?'uae':'qa'}">${c.country}</span>${c.rev!=null&&c.rev!==''?' <span class="badge">custom</span>':''}</div>
        <div class="s">${c.status==='receivable'?'Receivable':'Paid'} · ${fmtDate(c.date)}</div></div>
        <div style="text-align:right"><div class="amt pos">${fmt(carRev(c),'QAR')}</div>
-       <button class="del" style="color:var(--accent)" onclick="editCarRevValue('${c.id}','${mo}')">Edit</button></div></div>`).join('')}</div>
+       <button class="del" style="color:var(--accent)" onclick="editCarRevValue('${c.id}','${mo}')">Edit</button></div></div>`).join('')
+   +(g.entries||[]).map(e=>`
+     <div class="item"><div class="em">📦</div><div class="mid">
+       <div class="t">${e.count} × ${e.country} car${e.count>1?'s':''} <span class="badge ${e.country==='UAE'?'uae':'qa'}">${e.country}</span></div>
+       <div class="s">manual entry · ${fmtDate(e.date)}</div></div>
+       <div style="text-align:right"><div class="amt pos">${fmt(e.count*carRate(e.country),'QAR')}</div>
+       <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editCarRevEntry('${e.id}','${mo}')">Edit</button><button class="del" onclick="delCarRevEntry('${e.id}','${mo}')">Del</button></div></div></div>`).join('')}</div>
+   <button class="btn" onclick="openAddCarRev()">➕ Add revenue (by count)</button>
    <button class="btn ghost" onclick="openCarRev()">← All months</button>
   `);
 }
@@ -816,6 +827,52 @@ function saveCarRevValue(id,mo){
   c.rev=n; save(); openCarRevMonth(mo); toast('Revenue updated');
 }
 function resetCarRevValue(id,mo){ const c=S.cars.find(x=>x.id===id); if(c){ delete c.rev; save(); } openCarRevMonth(mo); toast('Reset to rate'); }
+/* manual car-revenue entries: country + number of cars */
+let _acRevCountry='Qatar';
+function openAddCarRev(){
+  _acRevCountry='Qatar';
+  openSheet(`
+   <h2>➕ Add car revenue</h2>
+   <label class="f">Country</label>
+   <div class="seg"><button id="acq-Qatar" class="on" onclick="acRevC('Qatar')">🇶🇦 Qatar (${fmt(carRate('Qatar'),'QAR')})</button><button id="acq-UAE" onclick="acRevC('UAE')">🇦🇪 UAE (${fmt(carRate('UAE'),'QAR')})</button></div>
+   <label class="f">Number of cars</label>
+   <input id="acRevCount" type="text" inputmode="numeric" placeholder="e.g. 3" oninput="acRevPreview()">
+   <div class="hint" id="acRevPrev"></div>
+   ${dateField('acRevDate')}
+   <button class="btn" onclick="saveAddCarRev()">Add revenue</button>
+  `);
+}
+function acRevC(c){ _acRevCountry=c; document.getElementById('acq-Qatar').classList.toggle('on',c==='Qatar'); document.getElementById('acq-UAE').classList.toggle('on',c==='UAE'); acRevPreview(); }
+function acRevPreview(){ const n=num(document.getElementById('acRevCount').value)||0; const el=document.getElementById('acRevPrev'); el.textContent = n>0? (n+' × '+fmt(carRate(_acRevCountry),'QAR')+' = '+fmt(n*carRate(_acRevCountry),'QAR')) : ''; }
+function saveAddCarRev(){
+  const n=Math.round(num(document.getElementById('acRevCount').value)); if(!n||n<=0)return toast('Enter number of cars');
+  const date=document.getElementById('acRevDate').value||today();
+  if(!S.carRevEntries)S.carRevEntries=[];
+  S.carRevEntries.push({id:uid(),country:_acRevCountry,count:n,date});
+  save(); openCarRevMonth(date.slice(0,7)); toast('Revenue added');
+}
+function editCarRevEntry(id,mo){
+  const e=(S.carRevEntries||[]).find(x=>x.id===id); if(!e)return; _acRevCountry=e.country;
+  openSheet(`
+   <h2>✎ Car revenue entry</h2>
+   <label class="f">Country</label>
+   <div class="seg"><button id="acq-Qatar" class="${e.country==='Qatar'?'on':''}" onclick="acRevC('Qatar')">🇶🇦 Qatar</button><button id="acq-UAE" class="${e.country==='UAE'?'on':''}" onclick="acRevC('UAE')">🇦🇪 UAE</button></div>
+   <label class="f">Number of cars</label>
+   <input id="acRevCount" type="text" inputmode="numeric" value="${e.count}" oninput="acRevPreview()">
+   <div class="hint" id="acRevPrev"></div>
+   <label class="f">Date</label><input type="date" id="acRevDate" value="${e.date}">
+   <button class="btn" onclick="saveEditCarRevEntry('${id}','${mo}')">Save</button>
+   <button class="btn red" onclick="delCarRevEntry('${id}','${mo}')">Delete</button>
+  `);
+  acRevPreview();
+}
+function saveEditCarRevEntry(id,mo){
+  const e=(S.carRevEntries||[]).find(x=>x.id===id); if(!e)return;
+  const n=Math.round(num(document.getElementById('acRevCount').value)); if(!n||n<=0)return toast('Enter number of cars');
+  e.country=_acRevCountry; e.count=n; e.date=document.getElementById('acRevDate').value||e.date;
+  save(); openCarRevMonth(e.date.slice(0,7)); toast('Updated');
+}
+function delCarRevEntry(id,mo){ S.carRevEntries=(S.carRevEntries||[]).filter(x=>x.id!==id); save(); openCarRevMonth(mo); toast('Deleted'); }
 
 /* ---------------- GOLD ---------------- */
 function openGold(){
@@ -1054,9 +1111,9 @@ function saveEditTxn(id){
   const date=document.getElementById('etDate').value||x.date;
   if(!amount||amount<=0)return toast('Enter an amount');
   reverseEffects(x.effects);                                   // undo old money move
-  const eff = x.edit.kind==='expense'? withdraw(acc,amount,cur) : deposit(acc,amount,cur);
+  const eff = x.edit.kind==='expense'? null : deposit(acc,amount,cur);  // expenses don't touch balances
   const label = x.edit.kind==='salary'?'Salary':x.edit.kind==='expense'?(det||'Expense'):(det||'Income');
-  Object.assign(x,{amount,currency:cur,date,effects:[eff],
+  Object.assign(x,{amount,currency:cur,date,effects:eff?[eff]:null,
     title:label, sub:(x.edit.kind==='expense'?'':x.edit.kind==='salary'?'Salary → ':'Income → ')+(x.edit.kind==='expense'?'From ':'')+accName(acc)});
   x.edit={...x.edit,account:acc,detail:det};
   save(); closeSheet(); toast('Updated');
@@ -1257,11 +1314,12 @@ function applyInboxItem(it){
       S.txns[S.txns.length-1].cat=it.category||'Bank SMS';
     }
   }
-  // reflect the balance: set to the bank's available balance if present, else apply the delta
+  // reflect the balance: the bank's available balance is the source of truth.
+  // otherwise only income adds — expenses never reduce the balance / net worth (tracked for budgeting only).
   if(hasBalance){
-    S.accounts[acc]=p.availBalance;                 // bank is the source of truth
-  }else if(hasAmount){
-    S.accounts[acc]+= (type==='income'?1:-1)*fromQAR(toQAR(amount,cur),cur);
+    S.accounts[acc]=p.availBalance;
+  }else if(hasAmount && type==='income'){
+    S.accounts[acc]+= fromQAR(toQAR(amount,cur),cur);
   }
   return true;
 }
