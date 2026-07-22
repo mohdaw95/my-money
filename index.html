@@ -397,7 +397,7 @@ function txRow(x){
   const pos = x.dir>0;
   return `<div class="item">
     <div class="em">${x.emoji}</div>
-    <div class="mid"><div class="t">${esc(x.title)}</div><div class="s">${esc(x.sub||'')} · ${fmtDate(x.date)}</div></div>
+    <div class="mid"><div class="t">${esc(x.title)}</div><div class="s">${esc(x.sub||'')} · ${fmtDate(x.date)}${x.time?' · '+x.time:''}</div></div>
     <div class="amt ${pos?'pos':'neg'}">${pos?'+':'−'}${fmt(x.amount,x.currency)}</div>
   </div>`;
 }
@@ -1164,7 +1164,19 @@ function doTransfer(from){
 
 /* ---------------- HISTORY / LOG ---------------- */
 /* effects = [{account,delta}] applied to balances (reversed on delete). edit = {kind,account,cur} for editable rows. */
-function log(emoji,title,sub,amount,currency,dir,date,effects,edit){ S.txns.push({id:uid(),emoji,title,sub,amount,currency,dir,date,effects:effects||null,edit:edit||null}); }
+function tsTime(ts){ if(!ts)return ''; const d=new Date(ts); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+/* pull a merchant/shop name out of a bank SMS */
+function smsMerchant(raw){
+  const s=(''+(raw||'')).replace(/\s+/g,' ').trim();
+  const m = s.match(/\bat\s+(.+?)(?:\s+on\b|\s+\d{1,2}[\/\-.]\d{1,2}|\s+ref\b|[.,]|$)/i)
+         || s.match(/\bdetails?\s*[:\-]\s*(.+?)(?:\s+on\b|\s+\d{1,2}[\/\-.]\d{1,2}|[.,]|$)/i)
+         || s.match(/\b(?:merchant|store|shop|to)\s*[:\-]?\s*([A-Za-z0-9&'’.\- ]{2,45})/i);
+  if(m && m[1]){ const x=m[1].replace(/[.,\-\s]+$/,'').trim(); if(x.length>=2 && x.length<=45) return x; }
+  return null;
+}
+/* time printed in the SMS, else null */
+function smsTime(raw){ const m=(''+(raw||'')).match(/\b(\d{1,2}:\d{2})(?::\d{2})?\s*(am|pm)?/i); return m? (m[1]+(m[2]?(' '+m[2].toUpperCase()):'')) : null; }
+function log(emoji,title,sub,amount,currency,dir,date,effects,edit){ S.txns.push({id:uid(),emoji,title,sub,amount,currency,dir,date,time:tsTime(Date.now()),effects:effects||null,edit:edit||null}); }
 /* keep the activity note for a car in sync with the car record (create/update) */
 function carTxnSync(c){
   const paid=c.status==='paid';
@@ -1183,7 +1195,7 @@ function openHistory(){
     const ed = x.src==='car'?`editCar('${x.srcId}')`: x.edit?`editTxn('${x.id}')`:'';
     const del = x.src==='car'?`delCar('${x.srcId}')`:`delTxn('${x.id}')`;
     return `<div class="item"><div class="em">${x.emoji}</div><div class="mid"><div class="t">${esc(x.title)}</div>
-    <div class="s">${esc(x.sub||'')} · ${fmtDate(x.date)}</div></div>
+    <div class="s">${esc(x.sub||'')} · ${fmtDate(x.date)}${x.time?' · '+x.time:''}</div></div>
     <div style="text-align:right"><div class="amt ${x.dir>0?'pos':x.dir<0?'neg':''}">${x.dir>0?'+':x.dir<0?'−':''}${fmt(x.amount,x.currency)}</div>
     <div class="row" style="gap:8px;justify-content:flex-end">${ed?`<button class="del" style="color:var(--accent)" onclick="${ed}">Edit</button>`:''}<button class="del" onclick="${del}">Delete</button></div></div></div>`;}).join(''):'<div class="empty">No activity.</div>'}</div>`);
 }
@@ -1398,7 +1410,9 @@ function applyInboxItem(it){
   const acc=routeAccount(it.raw, it.account);       // pick the card from the identifier in the text
   const cur=accCurrency(acc);
   const type=it.type||p.type||'expense';
-  const det=(it.detail&&it.detail.trim())||(it.raw?(''+it.raw).slice(0,70):'Bank SMS');
+  const merchant=smsMerchant(it.raw);
+  const det=merchant||(it.detail&&it.detail.trim())||(it.raw?(''+it.raw).slice(0,45):'Bank SMS');
+  const time=smsTime(it.raw)||tsTime(it.ts);
   const date=it.date||today();
   const hasAmount = amount && amount>0;
   const hasBalance = !isNaN(p.availBalance);
@@ -1412,6 +1426,7 @@ function applyInboxItem(it){
       log('📩',det,'Bank SMS · '+accName(acc),amount,cur,-1,date,null,{kind:'expense',account:acc,detail:det});
       S.txns[S.txns.length-1].cat=it.category||'Bank SMS';
     }
+    const x=S.txns[S.txns.length-1]; x.time=time; x.raw=it.raw;   // merchant time + keep full message
   }
   // reflect the balance: the bank's available balance is the source of truth.
   // otherwise only income adds — expenses never reduce the balance / net worth (tracked for budgeting only).
