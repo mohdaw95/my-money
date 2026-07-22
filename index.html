@@ -221,6 +221,8 @@ function carRevByMonth(){
   const slot=mo=>{ if(!m[mo])m[mo]={total:0,count:0,cars:[],entries:[]}; return m[mo]; };
   S.cars.forEach(c=>{ const s=slot((c.date||today()).slice(0,7)); s.total+=carRev(c); s.count++; s.cars.push(c); });
   (S.carRevEntries||[]).forEach(e=>{ const s=slot((e.date||today()).slice(0,7)); const rev=(+e.count||0)*carRate(e.country); s.total+=rev; s.count+=(+e.count||0); s.entries.push(e); });
+  const ov=S.settings.carRevOverride||{};   // manual month total overrides the computed one
+  Object.keys(ov).forEach(mo=>{ if(ov[mo]!=null&&ov[mo]!==''){ slot(mo).total=+ov[mo]||0; m[mo].override=true; } });
   return m;
 }
 function monthLabel(mo){ const p=mo.split('-'); const d=new Date(+p[0],+p[1]-1,1); return d.toLocaleDateString('en',{month:'long',year:'numeric'}); }
@@ -230,6 +232,7 @@ const DEFAULT={
              gold21kJOD:47, goldUpdated:null, fxUpdated:null, liraGrams:8, lastBackup:null,
              cloudUrl:'', cloudKey:'', lastSync:null, lastCloudBackup:null, carRevUAE:850, carRevQatar:1000,
              monthlySalary:19250, salaryByMonth:{}, savingsByMonth:{'2026-06':12000},
+             carRevOverride:{'2026-05':10400}, expOverride:{'2026-05':28389},
              exitBasic:9000, exitStart:'2022-11-01',
              exitItems:[{name:'Nissan Patrol',value:25000},{name:'Cadillac Escalade',value:10000},{name:'Furniture',value:4000}] },
   updatedAt:0,
@@ -879,8 +882,11 @@ function openCarRevMonth(mo){
   const g=carRevByMonth()[mo]||{total:0,count:0,cars:[]};
   openSheet(`
    <h2>📤 ${monthLabel(mo)}</h2>
-   <div class="kv"><span style="font-weight:800">Revenue this month</span><span style="font-weight:800;color:var(--green)">${fmt(g.total,'QAR')}</span></div>
+   <div class="kv"><span style="font-weight:800">Revenue this month${g.override?' <span class="badge">manual</span>':''}</span><span style="font-weight:800;color:var(--green)">${fmt(g.total,'QAR')}</span></div>
    <div class="kv"><span>Cars exported</span><span>${g.count}</span></div>
+   <label class="f">✎ Set month total manually (QAR)</label>
+   <input id="carRevOv" type="text" inputmode="decimal" value="${(S.settings.carRevOverride||{})[mo]!=null?(S.settings.carRevOverride||{})[mo]:''}" placeholder="leave blank to auto-total">
+   <div class="row" style="gap:8px"><button class="btn" style="margin-top:8px" onclick="saveMonthOverride('carRevOverride','${mo}','carRevOv',openCarRevMonth)">Save total</button></div>
    <div class="list" style="margin-top:12px">${g.cars.map(c=>`
      <div class="item"><div class="em">🚗</div><div class="mid">
        <div class="t">${esc(c.detail||'Car')} <span class="badge ${c.country==='UAE'?'uae':'qa'}">${c.country}</span>${c.rev!=null&&c.rev!==''?' <span class="badge">custom</span>':''}</div>
@@ -1515,6 +1521,8 @@ function openExpenses(){
 function expByMonth(){
   const m={};
   S.txns.filter(x=>x.dir<0).forEach(x=>{ const mo=(x.date||today()).slice(0,7); if(!m[mo])m[mo]={total:0,items:[]}; m[mo].total+=toQAR(x.amount,x.currency); m[mo].items.push(x); });
+  const ov=S.settings.expOverride||{};       // manual month total overrides the computed one
+  Object.keys(ov).forEach(mo=>{ if(ov[mo]!=null&&ov[mo]!==''){ if(!m[mo])m[mo]={total:0,items:[]}; m[mo].total=+ov[mo]||0; m[mo].override=true; } });
   return m;
 }
 function openExpMonths(){
@@ -1535,9 +1543,13 @@ function openExpMonth(mo){
   const items=S.txns.filter(x=>x.dir<0 && (x.date||'').slice(0,7)===mo);
   const groups={}; items.forEach(x=>{ const c=expenseCat(x); (groups[c]=groups[c]||[]).push(x); });
   const cats=Object.keys(groups).sort((a,b)=>sumQAR(groups[b])-sumQAR(groups[a]));
+  const g=expByMonth()[mo]||{total:sumQAR(items)};
   openSheet(`
    <h2>🧾 ${monthLabel(mo)}</h2>
-   <div class="kv"><span style="font-weight:800">Total spent</span><span style="font-weight:800;color:var(--red)">${fmt(sumQAR(items),'QAR')}</span></div>
+   <div class="kv"><span style="font-weight:800">Total spent${g.override?' <span class="badge">manual</span>':''}</span><span style="font-weight:800;color:var(--red)">${fmt(g.total,'QAR')}</span></div>
+   <label class="f">✎ Set month total manually (QAR)</label>
+   <input id="expOv" type="text" inputmode="decimal" value="${(S.settings.expOverride||{})[mo]!=null?(S.settings.expOverride||{})[mo]:''}" placeholder="leave blank to auto-total">
+   <button class="btn" style="margin-top:8px" onclick="saveMonthOverride('expOverride','${mo}','expOv',openExpMonth)">Save total</button>
    ${cats.length? cats.map(c=>`
      <div class="kv" style="margin-top:8px;border-bottom:2px solid var(--line)"><span style="font-weight:700">${esc(c)}</span><span style="font-weight:700;color:var(--red)">${fmt(sumQAR(groups[c]),'QAR')}</span></div>
      <div class="list" style="margin-top:6px">${groups[c].map(x=>`
@@ -1554,6 +1566,14 @@ function openExpMonth(mo){
 function salaryForMonth(mo){ const o=S.settings.salaryByMonth||{}; return (o[mo]!=null && o[mo]!=='')? (+o[mo]||0) : (+S.settings.monthlySalary||0); }
 function carRevForMonth(mo){ const g=carRevByMonth()[mo]; return g?g.total:0; }
 function expForMonth(mo){ const g=expByMonth()[mo]; return g?g.total:0; }
+/* generic: set/clear a per-month settings override map ('carRevOverride' / 'expOverride') from an input field */
+function saveMonthOverride(mapKey, mo, inputId, reopenFn){
+  if(!S.settings[mapKey])S.settings[mapKey]={};
+  const raw=document.getElementById(inputId).value.trim();
+  if(raw===''){ delete S.settings[mapKey][mo]; }
+  else { const n=num(raw); if(isNaN(n))return toast('Enter a number'); S.settings[mapKey][mo]=n; }
+  save(); reopenFn(mo); toast('Saved');
+}
 function savingsManual(mo){ const o=S.settings.savingsByMonth||{}; return (o[mo]!=null && o[mo]!=='')? (+o[mo]||0) : null; }
 function savingsForMonth(mo){ const m=savingsManual(mo); return m!=null ? m : salaryForMonth(mo)+carRevForMonth(mo)-expForMonth(mo); }
 function activityMonths(){
