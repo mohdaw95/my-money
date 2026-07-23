@@ -708,16 +708,24 @@ function saveEditPR(id){
 function carDefaults(country){
   return { commission: carRate(country), deposit: country==='Qatar'?1000:0, inspection: country==='Qatar'?150:0, transfer: 0 };
 }
-/* the breakdown fields; receivable = their sum (live) */
-function carFormFields(c){ return `
-   <label class="f">Commission (QAR)</label><input id="carComm" type="text" inputmode="decimal" value="${c.commission!=null?c.commission:''}" oninput="carRecvPreview()">
-   <label class="f">Deposit (QAR)</label><input id="carDep" type="text" inputmode="decimal" value="${c.deposit!=null?c.deposit:''}" oninput="carRecvPreview()">
-   <label class="f">Inspection (QAR)</label><input id="carInsp" type="text" inputmode="decimal" value="${c.inspection!=null?c.inspection:''}" oninput="carRecvPreview()">
-   <label class="f">Transfer fee (QAR)</label><input id="carTrans" type="text" inputmode="decimal" value="${c.transfer!=null?c.transfer:''}" oninput="carRecvPreview()">
+/* the breakdown fields; receivable = their sum (live). Deposit & Inspection show for Qatar only. */
+function carFormFields(c){
+  const country=window._carC||c.country||'Qatar';
+  const d=carDefaults(country);
+  const v=(f)=> (c[f]!=null && c[f]!=='') ? c[f] : d[f];
+  return `
+   <label class="f">Commission (QAR)</label><input id="carComm" type="text" inputmode="decimal" value="${v('commission')}" oninput="carRecvPreview()">
+   <div id="carQatarOnly" class="${country==='Qatar'?'':'hide'}">
+     <label class="f">Deposit (QAR)</label><input id="carDep" type="text" inputmode="decimal" value="${v('deposit')}" oninput="carRecvPreview()">
+     <label class="f">Inspection (QAR)</label><input id="carInsp" type="text" inputmode="decimal" value="${v('inspection')}" oninput="carRecvPreview()">
+   </div>
+   <label class="f">Transfer fee (QAR)</label><input id="carTrans" type="text" inputmode="decimal" value="${v('transfer')}" oninput="carRecvPreview()">
    <div class="kv" style="margin-top:10px"><span style="font-weight:800">Receivable total</span><span style="font-weight:800;color:var(--green)" id="carRecvTotal">QAR 0</span></div>`;
 }
 function carRecvPreview(){
-  const t=['carComm','carDep','carInsp','carTrans'].reduce((s,id)=>{ const el=document.getElementById(id); return s+(el?(num(el.value)||0):0); },0);
+  const country=window._carC||'Qatar';
+  const g=id=>{ const el=document.getElementById(id); return el?(num(el.value)||0):0; };
+  const t = g('carComm') + (country==='Qatar'?(g('carDep')+g('carInsp')):0) + g('carTrans');
   const el=document.getElementById('carRecvTotal'); if(el) el.textContent=fmt(t,'QAR');
   return t;
 }
@@ -734,11 +742,14 @@ function openCarAdd(){
   `);
   carRecvPreview();
 }
-/* country toggle in the ADD form re-fills the country defaults */
-function carCAdd(country){
-  window._carC=country;
+function carCountryUI(country){
   document.getElementById('cq-Qatar').classList.toggle('on',country==='Qatar');
   document.getElementById('cq-UAE').classList.toggle('on',country==='UAE');
+  const q=document.getElementById('carQatarOnly'); if(q) q.classList.toggle('hide',country!=='Qatar');
+}
+/* country toggle in the ADD form re-fills the country defaults */
+function carCAdd(country){
+  window._carC=country; carCountryUI(country);
   const d=carDefaults(country);
   document.getElementById('carComm').value=d.commission;
   document.getElementById('carDep').value=d.deposit;
@@ -746,16 +757,28 @@ function carCAdd(country){
   document.getElementById('carTrans').value=d.transfer;
   carRecvPreview();
 }
-/* country toggle in the EDIT form just changes the country (keeps values) */
-function carC(c){ window._carC=c; document.getElementById('cq-Qatar').classList.toggle('on',c==='Qatar'); document.getElementById('cq-UAE').classList.toggle('on',c==='UAE'); }
+/* country toggle in the EDIT form: show/hide Qatar-only fields, fill defaults for empty ones */
+function carC(country){
+  window._carC=country; carCountryUI(country);
+  const d=carDefaults(country);
+  const comm=document.getElementById('carComm'); if(comm && comm.value.trim()==='') comm.value=d.commission;
+  if(country==='Qatar'){
+    const dep=document.getElementById('carDep'), insp=document.getElementById('carInsp');
+    if(dep && dep.value.trim()==='') dep.value=d.deposit;
+    if(insp && insp.value.trim()==='') insp.value=d.inspection;
+  }
+  carRecvPreview();
+}
 function saveCar(){
+  const country=window._carC||'Qatar';
   const det=document.getElementById('carDet').value.trim();
   const date=document.getElementById('carDate').value||today();
-  const comm=num(document.getElementById('carComm').value)||0, dep=num(document.getElementById('carDep').value)||0,
-        insp=num(document.getElementById('carInsp').value)||0, trans=num(document.getElementById('carTrans').value)||0;
+  const comm=num(document.getElementById('carComm').value)||0, trans=num(document.getElementById('carTrans').value)||0;
+  const dep=country==='Qatar'?(num(document.getElementById('carDep').value)||0):0;   // UAE has no deposit/inspection
+  const insp=country==='Qatar'?(num(document.getElementById('carInsp').value)||0):0;
   const amount=comm+dep+insp+trans;
   if(amount<=0)return toast('Enter the amounts');
-  const c={id:uid(),amount,currency:'QAR',country:window._carC,status:'receivable',detail:det,date,commission:comm,deposit:dep,inspection:insp,transfer:trans};
+  const c={id:uid(),amount,currency:'QAR',country,status:'receivable',detail:det,date,commission:comm,deposit:dep,inspection:insp,transfer:trans};
   S.cars.push(c); carTxnSync(c);
   save(); closeSheet(); toast('Car added · receivable '+fmt(amount,'QAR'));
 }
@@ -795,8 +818,10 @@ function editCar(id){
 }
 function saveEditCar(id){
   const c=S.cars.find(x=>x.id===id); if(!c)return;
-  const comm=num(document.getElementById('carComm').value)||0, dep=num(document.getElementById('carDep').value)||0,
-        insp=num(document.getElementById('carInsp').value)||0, trans=num(document.getElementById('carTrans').value)||0;
+  const country=window._carC||'Qatar';
+  const comm=num(document.getElementById('carComm').value)||0, trans=num(document.getElementById('carTrans').value)||0;
+  const dep=country==='Qatar'?(num(document.getElementById('carDep').value)||0):0;   // UAE has no deposit/inspection
+  const insp=country==='Qatar'?(num(document.getElementById('carInsp').value)||0):0;
   const amount=comm+dep+insp+trans; if(amount<=0)return toast('Enter the amounts');
   const det=document.getElementById('carDet').value.trim();
   const date=document.getElementById('carDate').value||c.date;
