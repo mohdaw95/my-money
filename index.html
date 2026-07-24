@@ -293,6 +293,7 @@ function totals(){
 
 /* ---------------- RENDER ---------------- */
 function render(){
+  _sheetBack=null;   // on the home screen, a message popup's Close returns home
   const t=totals();
   document.getElementById('netWorth').innerHTML = 'QAR '+Math.round(t.net).toLocaleString('en');
 
@@ -404,7 +405,7 @@ function txRow(x){
   const pos = x.dir>0;
   return `<div class="item">
     <div class="em">${x.emoji}</div>
-    <div class="mid"><div class="t">${esc(x.title)}</div><div class="s">${esc(x.sub||'')} · ${fmtDate(x.date)}${x.time?' · '+x.time:''}</div></div>
+    <div class="mid${x.raw?' tap':''}" ${x.raw?`onclick="showRawMsg('${x.id}')"`:''}><div class="t">${esc(x.title)}${x.raw?' <span class="dim" style="font-size:12px">💬</span>':''}</div><div class="s">${esc(x.sub||'')} · ${fmtDate(x.date)}${x.time?' · '+x.time:''}</div></div>
     <div class="amt ${pos?'pos':'neg'}">${pos?'+':'−'}${fmt(x.amount,x.currency)}</div>
   </div>`;
 }
@@ -1228,6 +1229,7 @@ function carTxnSync(c){
 }
 function carTxnRemove(id){ S.txns=S.txns.filter(t=>t.srcId!==id); }
 function openHistory(){
+  _sheetBack=openHistory;
   const list=[...S.txns].reverse();
   openSheet(`<h2>🕑 All activity</h2><div class="list">${list.length?list.map(x=>{
     const ed = x.src==='car'?`editCar('${x.srcId}')`: x.edit?`editTxn('${x.id}')`:'';
@@ -1244,9 +1246,11 @@ function showRawMsg(id){
    <div class="kv"><span>${esc(x.title)}</span><span class="amt ${x.dir<0?'neg':'pos'}">${x.dir>0?'+':x.dir<0?'−':''}${fmt(x.amount,x.currency)}</span></div>
    <div class="s" style="margin:2px 0 10px">${esc(x.sub||'')} · ${fmtDate(x.date)}${x.time?' · '+x.time:''}</div>
    <div style="white-space:pre-wrap;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;font-size:14px;line-height:1.55">${esc(x.raw)}</div>
-   <button class="btn ghost" onclick="closeSheet()">Close</button>
+   <button class="btn ghost" onclick="closeRawMsg()">Close</button>
   `);
 }
+let _sheetBack=null;   // reopen the list a detail popup was launched from
+function closeRawMsg(){ if(_sheetBack){ const f=_sheetBack; f(); } else closeSheet(); }
 function delTxn(id){ const x=S.txns.find(t=>t.id===id); if(!x)return; if(!confirm('Delete this entry? Any money it moved will be put back.'))return; reverseEffects(x.effects); if(x.restorePR){ S.pr.push(x.restorePR); } S.txns=S.txns.filter(t=>t.id!==id); save(); openHistory(); toast('Deleted'); }
 function editTxn(id){
   const x=S.txns.find(t=>t.id===id); if(!x||!x.edit)return toast('This entry can only be deleted');
@@ -1541,6 +1545,7 @@ function disconnectCloud(){ S.settings.cloudUrl=''; S.settings.cloudKey=''; loca
 function expenseCat(x){ return x.cat || (x.sub? (''+x.sub).split(' · ')[0] : 'Other') || 'Other'; }
 function sumQAR(arr){ return arr.reduce((s,x)=>s+toQAR(x.amount,x.currency),0); }
 function openExpenses(){
+  _sheetBack=openExpenses;
   const exps=S.txns.filter(x=>x.dir<0);
   const groups={}; exps.forEach(x=>{ const c=expenseCat(x); (groups[c]=groups[c]||[]).push(x); });
   const cats=Object.keys(groups).sort((a,b)=>sumQAR(groups[b])-sumQAR(groups[a]));
@@ -1580,6 +1585,7 @@ function openExpMonths(){
   `);
 }
 function openExpMonth(mo){
+  _sheetBack=()=>openExpMonth(mo);
   const items=S.txns.filter(x=>x.dir<0 && (x.date||'').slice(0,7)===mo);
   const groups={}; items.forEach(x=>{ const c=expenseCat(x); (groups[c]=groups[c]||[]).push(x); });
   const cats=Object.keys(groups).sort((a,b)=>sumQAR(groups[b])-sumQAR(groups[a]));
