@@ -1289,7 +1289,7 @@ function saveEditTxn(id){
   if(!amount||amount<=0)return toast('Enter an amount');
   reverseEffects(x.effects);                                   // undo old money move
   if(x.edit.kind==='expense'){
-    if(catEl) x.cat=catEl.value;
+    if(catEl){ x.cat=catEl.value; x.catEdited=true; }
     Object.assign(x,{amount,currency:cur,date,effects:null, title:det||x.cat||'Expense', sub:x.cat||'Expense'});
     x.edit={...x.edit,detail:det};
   }else{
@@ -1482,17 +1482,17 @@ function parseSms(raw){
 /* auto-categorise an expense from its merchant / message text */
 const CATEGORIES=['General','Groceries','Food & Dining','Fuel','Transport','Bills','Shopping','Health','Entertainment','Travel','ATM / Cash','Transfer','Car costs','Rent','Other'];
 const CAT_RULES=[
-  ['Groceries', /carrefour|lulu|al\s?meera|almeera|monoprix|supermarket|hypermarket|grocery|baqala|family food|safari|megamart|quick\s?mart|mahaseel|grand\s?mall|saudia/i],
-  ['Food & Dining', /talabat|snoonu|rafeeq|restaurant|cafe|coffee|starbucks|mcdonald|\bkfc\b|burger|pizza|domino|subway|dunkin|costa|tim\s?horton|shawarma|karak|bakery|baskin|nando|texas|hardee|papa\s?john|krispy|chili|dairy queen|sushi|grill/i],
-  ['Fuel', /woqod|petrol|\bfuel\b|filling station|\bstation\b/i],
-  ['Transport', /karwa|taxi|uber|careem|metro|\bbus\b|parking|mowasalat|salik|nol\b/i],
-  ['Bills', /ooredoo|vodafone|kahramaa|electricity|\bwater\b|utility|\bbill\b|internet|postpaid|recharge/i],
-  ['Shopping', /\bmall\b|ikea|h&m|zara|centrepoint|home\s?centre|amazon|\bnoon\b|virgin|apple store|ounass|namshi|sephora|\bmax\b|splash|waikiki|decathlon|jarir|electronics/i],
-  ['Health', /pharmacy|hospital|clinic|medical|\baster\b|naseem|kulud|dental|\bdr\.?\b/i],
-  ['Entertainment', /cinema|\bvox\b|novo|netflix|spotify|playstation|\bgame\b|steam|shahid|osn/i],
-  ['Travel', /qatar airways|airways|airline|flight|\bhotel\b|booking\.com|agoda|airbnb/i],
+  ['Groceries', /carrefour|\blulu\b|al\s?meera|almeera|monoprix|supermarket|hypermarket|grocery|baqala|family food|\bsafari\b|megamart|quick\s?mart|mahaseel|saudia|\bansar\b|\bspar\b|\bcoop\b|\bkims\b|fresh market|marches|nesto|masskar|grand\s?hyper|city\s?center\s?super|paris\s?gallery/i],
+  ['Food & Dining', /talabat|snoonu|rafeeq|restaurant|\bcafe\b|caffe|coffee|starbucks|mcdonald|\bkfc\b|burger|pizza|domino|subway|dunkin|\bcosta\b|tim\s?horton|shawarma|karak|bakery|baskin|nando|texas|hardee|papa\s?john|krispy|chili|dairy queen|sushi|\bgrill\b|kitchen|bistro|eatery|dining|\bjuice\b|chicken|shake shack|five guys|wendy|popeyes|cheesecake|catering|sweets|patisserie|chocolat|karafirin|\btea\b|\bbbq\b|noodle|kebab|biryani|\bmandi\b|steak|lounge|dhaba|cravia|\bfood\b/i],
+  ['Fuel', /woqod|petrol|\bfuel\b|filling station|\bstation\b|\bgas\b/i],
+  ['Transport', /karwa|\btaxi\b|\buber\b|careem|\bmetro\b|\bbus\b|parking|mowasalat|salik|\bnol\b|limousine|car rental|rent a car|hertz|\bavis\b|\bcab\b/i],
+  ['Bills', /ooredoo|vodafone|kahramaa|electricity|\bwater\b|utility|\bbill\b|internet|postpaid|recharge|telecom|\bdu\b|\bfee\b/i],
+  ['Health', /pharmacy|hospital|clinic|medical|\baster\b|naseem|kulud|dental|\bdr\.?\b|\bhealth\b|wellness|optic|labaih|hamad medical|\bcare\b|\blab\b/i],
+  ['Entertainment', /cinema|\bvox\b|\bnovo\b|netflix|spotify|playstation|\bgame\b|\bsteam\b|shahid|\bosn\b|adventure|\bcastle\b|\bpark\b|kidzania|gondolania|bowling|\bticket\b|amusement|angry birds|\bfun\b|arcade|\btoys?\b|entertainment/i],
+  ['Travel', /qatar airways|airways|airline|\bflight\b|\bhotel\b|booking|agoda|airbnb|intercontinental|marriott|hilton|sheraton|radisson|movenpick|\bresort\b|\btravel\b|\btour\b|kempinski|\britz\b|four seasons|\binn\b|mondrian|banana island|\bqia\b/i],
   ['ATM / Cash', /\batm\b|cash withdrawal|withdrawal/i],
-  ['Transfer', /transfer|fawran|remittance|western union|moneygram/i],
+  ['Transfer', /\btransfer\b|fawran|remittance|western union|moneygram/i],
+  ['Shopping', /\bmall\b|\bikea\b|h&m|\bzara\b|centrepoint|centre\s?point|home\s?centre|amazon|\bnoon\b|virgin|apple\s?store|ounass|namshi|sephora|\bmax\b|splash|waikiki|decathlon|jarir|electronics|\btrad\b|trading|\bstore\b|boutique|fashion|clothing|jewell|watches|hamleys|\blego\b|brands|outlet|\bmart\b|\bgift\b|\bshoes?\b|\bnike\b|adidas|shein|\bh\s?and\s?m\b|home\s?box|\bpan\s?emirates\b/i],
 ];
 function categorize(text){ const s=''+(text||''); for(const [cat,re] of CAT_RULES){ if(re.test(s)) return cat; } return 'General'; }
 function catOptions(sel){ const list=[...CATEGORIES]; if(sel && !list.includes(sel)) list.unshift(sel); return list.map(c=>`<option ${sel===c?'selected':''}>${esc(c)}</option>`).join(''); }
@@ -1553,7 +1553,11 @@ function saveCloud(){
 function disconnectCloud(){ S.settings.cloudUrl=''; S.settings.cloudKey=''; localStorage.setItem(LS,JSON.stringify(S)); closeSheet(); toast('Disconnected'); }
 
 /* ---------------- EXPENSES BY CATEGORY ---------------- */
-function expenseCat(x){ if(x.cat && x.cat!=='Bank SMS') return x.cat; const s=smsSource(x); if(s){ const c=categorize(s); if(c) return c; } return x.cat || 'General'; }
+function expenseCat(x){
+  if(x.catEdited && x.cat) return x.cat;              // user set it manually → keep it
+  const s=smsSource(x); if(s) return categorize(s);   // bank entries → always auto-categorise with the latest rules
+  return x.cat || 'General';                          // manual entries → their own category
+}
 function sumQAR(arr){ return arr.reduce((s,x)=>s+toQAR(x.amount,x.currency),0); }
 function openExpenses(){
   _sheetBack=openExpenses;
