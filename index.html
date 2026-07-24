@@ -1211,7 +1211,8 @@ function smsMerchant(raw){
       || one(/\bat\s+([A-Za-z0-9&'’.\- ]{2,45}?)(?:\s+on\b|\s+\d{1,2}[\/\-.]\d{1,2}|[.,\n]|$)/i)
       || one(new RegExp('(?:merchant|store|shop)\\s*[:\\-]\\s*(.+?)'+STOP,'i'))
       || (/fawran/i.test(s) ? ((s.match(/to alias\s*[:\-]\s*(\S+)/i)||[])[1] ? 'Fawran → '+s.match(/to alias\s*[:\-]\s*(\S+)/i)[1] : 'Fawran transfer') : null)
-      || (/\bdebited\b/i.test(s) ? 'Account debit' : null);
+      || (/\bdebited\b/i.test(s) ? 'Account debit' : null)
+      || (/(credit|debit) card.*(purchase|used)|has been used/i.test(s) ? 'Card purchase' : null);   // fallback when the location wasn't saved
 }
 /* time printed in the SMS, else null */
 function smsTime(raw){ const m=(''+(raw||'')).match(/\b(\d{1,2}:\d{2})(?::\d{2})?\s*(am|pm)?/i); return m? (m[1]+(m[2]?(' '+m[2].toUpperCase()):'')) : null; }
