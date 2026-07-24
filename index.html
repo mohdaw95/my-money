@@ -1386,7 +1386,9 @@ async function syncCloud(opts){
     if(r.status===401){ if(opts.manual)toast('Wrong secret key'); return; }
     const d=await r.json();
     if(d.state && (d.updatedAt||0) > (S.updatedAt||0)){        // remote is newer → adopt
-      S={...clone(DEFAULT),...d.state}; localStorage.setItem(LS,JSON.stringify(S)); render();
+      S={...clone(DEFAULT),...d.state}; localStorage.setItem(LS,JSON.stringify(S));
+      retitleOldSms();                                        // re-title merchants on the freshly-adopted data
+      render();
     }
     const ri=await fetch(base+'/inbox',{headers:cloudHeaders()});
     const di=await ri.json(); const items=di.inbox||[]; let applied=0;
