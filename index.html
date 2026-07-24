@@ -1232,10 +1232,20 @@ function openHistory(){
   openSheet(`<h2>🕑 All activity</h2><div class="list">${list.length?list.map(x=>{
     const ed = x.src==='car'?`editCar('${x.srcId}')`: x.edit?`editTxn('${x.id}')`:'';
     const del = x.src==='car'?`delCar('${x.srcId}')`:`delTxn('${x.id}')`;
-    return `<div class="item"><div class="em">${x.emoji}</div><div class="mid"><div class="t">${esc(x.title)}</div>
+    return `<div class="item"><div class="em">${x.emoji}</div><div class="mid${x.raw?' tap':''}" ${x.raw?`onclick="showRawMsg('${x.id}')"`:''}><div class="t">${esc(x.title)}${x.raw?' <span class="dim" style="font-size:12px">💬</span>':''}</div>
     <div class="s">${esc(x.sub||'')} · ${fmtDate(x.date)}${x.time?' · '+x.time:''}</div></div>
     <div style="text-align:right"><div class="amt ${x.dir>0?'pos':x.dir<0?'neg':''}">${x.dir>0?'+':x.dir<0?'−':''}${fmt(x.amount,x.currency)}</div>
     <div class="row" style="gap:8px;justify-content:flex-end">${ed?`<button class="del" style="color:var(--accent)" onclick="${ed}">Edit</button>`:''}<button class="del" onclick="${del}">Delete</button></div></div></div>`;}).join(''):'<div class="empty">No activity.</div>'}</div>`);
+}
+function showRawMsg(id){
+  const x=S.txns.find(t=>t.id===id); if(!x||!x.raw)return;
+  openSheet(`
+   <h2>💬 Original message</h2>
+   <div class="kv"><span>${esc(x.title)}</span><span class="amt ${x.dir<0?'neg':'pos'}">${x.dir>0?'+':x.dir<0?'−':''}${fmt(x.amount,x.currency)}</span></div>
+   <div class="s" style="margin:2px 0 10px">${esc(x.sub||'')} · ${fmtDate(x.date)}${x.time?' · '+x.time:''}</div>
+   <div style="white-space:pre-wrap;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;font-size:14px;line-height:1.55">${esc(x.raw)}</div>
+   <button class="btn ghost" onclick="closeSheet()">Close</button>
+  `);
 }
 function delTxn(id){ const x=S.txns.find(t=>t.id===id); if(!x)return; if(!confirm('Delete this entry? Any money it moved will be put back.'))return; reverseEffects(x.effects); if(x.restorePR){ S.pr.push(x.restorePR); } S.txns=S.txns.filter(t=>t.id!==id); save(); openHistory(); toast('Deleted'); }
 function editTxn(id){
@@ -1540,8 +1550,8 @@ function openExpenses(){
    ${cats.length? cats.map(c=>`
      <div class="kv" style="margin-top:8px;border-bottom:2px solid var(--line)"><span style="font-weight:700">${esc(c)}</span><span style="font-weight:700;color:var(--red)">${fmt(sumQAR(groups[c]),'QAR')}</span></div>
      <div class="list" style="margin-top:6px">${groups[c].map(x=>`
-       <div class="item"><div class="em">${x.emoji}</div><div class="mid"><div class="t">${esc(x.title)}</div>
-       <div class="s">${x.edit&&x.edit.account?accName(x.edit.account)+' · ':''}${fmtDate(x.date)}</div></div>
+       <div class="item"><div class="em">${x.emoji}</div><div class="mid${x.raw?' tap':''}" ${x.raw?`onclick="showRawMsg('${x.id}')"`:''}><div class="t">${esc(x.title)}${x.raw?' <span class="dim" style="font-size:12px">💬</span>':''}</div>
+       <div class="s">${x.edit&&x.edit.account?accName(x.edit.account)+' · ':''}${fmtDate(x.date)}${x.time?' · '+x.time:''}</div></div>
        <div style="text-align:right"><div class="amt neg">${fmt(x.amount,x.currency)}</div>
        <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editTxn('${x.id}')">Edit</button><button class="del" onclick="delTxn('${x.id}')">Del</button></div></div></div>`).join('')}</div>`).join('')
      : '<div class="empty">No expenses yet. They appear here (grouped by category) as you add them or as bank SMS come in.</div>'}
@@ -1583,8 +1593,8 @@ function openExpMonth(mo){
    ${cats.length? cats.map(c=>`
      <div class="kv" style="margin-top:8px;border-bottom:2px solid var(--line)"><span style="font-weight:700">${esc(c)}</span><span style="font-weight:700;color:var(--red)">${fmt(sumQAR(groups[c]),'QAR')}</span></div>
      <div class="list" style="margin-top:6px">${groups[c].map(x=>`
-       <div class="item"><div class="em">${x.emoji}</div><div class="mid"><div class="t">${esc(x.title)}</div>
-       <div class="s">${x.edit&&x.edit.account?accName(x.edit.account)+' · ':''}${fmtDate(x.date)}</div></div>
+       <div class="item"><div class="em">${x.emoji}</div><div class="mid${x.raw?' tap':''}" ${x.raw?`onclick="showRawMsg('${x.id}')"`:''}><div class="t">${esc(x.title)}${x.raw?' <span class="dim" style="font-size:12px">💬</span>':''}</div>
+       <div class="s">${x.edit&&x.edit.account?accName(x.edit.account)+' · ':''}${fmtDate(x.date)}${x.time?' · '+x.time:''}</div></div>
        <div style="text-align:right"><div class="amt neg">${fmt(x.amount,x.currency)}</div>
        <button class="del" style="color:var(--accent)" onclick="editTxn('${x.id}')">Edit</button></div></div>`).join('')}</div>`).join('')
      : '<div class="empty">No expenses this month.</div>'}
