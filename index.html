@@ -1202,12 +1202,15 @@ function doTransfer(from){
 function tsTime(ts){ if(!ts)return ''; const d=new Date(ts); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 /* pull a merchant/shop name out of a bank SMS */
 function smsMerchant(raw){
-  const s=(''+(raw||'')).replace(/\s+/g,' ').trim();
-  const m = s.match(/\bat\s+(.+?)(?:\s+on\b|\s+\d{1,2}[\/\-.]\d{1,2}|\s+ref\b|[.,]|$)/i)
-         || s.match(/\bdetails?\s*[:\-]\s*(.+?)(?:\s+on\b|\s+\d{1,2}[\/\-.]\d{1,2}|[.,]|$)/i)
-         || s.match(/\b(?:merchant|store|shop|to)\s*[:\-]?\s*([A-Za-z0-9&'’.\- ]{2,45})/i);
-  if(m && m[1]){ const x=m[1].replace(/[.,\-\s]+$/,'').trim(); if(x.length>=2 && x.length<=45) return x; }
-  return null;
+  const s=(''+(raw||''));
+  const one=(re)=>{ const m=s.match(re); if(m&&m[1]){ let x=m[1].split(/\r?\n/)[0].replace(/[.,\-\s]+$/,'').trim(); if(x.length>=2 && x.length<=45) return x; } return null; };
+  // QNB card: "Location: MERCHANT"   |   generic "at MERCHANT" / "Merchant: X"
+  const STOP='(?:\\r?\\n|available|amount|balance|date|thank|keep using|in case|$)';
+  return one(new RegExp('location\\s*[:\\-]\\s*(.+?)'+STOP,'i'))
+      || one(/\bat\s+([A-Za-z0-9&'’.\- ]{2,45}?)(?:\s+on\b|\s+\d{1,2}[\/\-.]\d{1,2}|[.,\n]|$)/i)
+      || one(new RegExp('(?:merchant|store|shop)\\s*[:\\-]\\s*(.+?)'+STOP,'i'))
+      || (/fawran/i.test(s) ? ((s.match(/to alias\s*[:\-]\s*(\S+)/i)||[])[1] ? 'Fawran → '+s.match(/to alias\s*[:\-]\s*(\S+)/i)[1] : 'Fawran transfer') : null)
+      || (/\bdebited\b/i.test(s) ? 'Account debit' : null);
 }
 /* time printed in the SMS, else null */
 function smsTime(raw){ const m=(''+(raw||'')).match(/\b(\d{1,2}:\d{2})(?::\d{2})?\s*(am|pm)?/i); return m? (m[1]+(m[2]?(' '+m[2].toUpperCase()):'')) : null; }
@@ -1707,7 +1710,24 @@ function saveUrgentExit(){
   save(); openUrgentExit(); toast('Saved');
 }
 
+/* re-title old bank-SMS entries with the improved merchant extractor (runs once) */
+function retitleOldSms(){
+  if(S.settings.retitled_v3) return;
+  let changed=false;
+  (S.txns||[]).forEach(x=>{
+    if(!x.raw) return;
+    const looksRaw = /^(your |account number|your account|your credit|your funds)/i.test(x.title||'');
+    const m=smsMerchant(x.raw);
+    if(m && looksRaw && m!==x.title){ x.title=m; changed=true; }
+    if(!x.time){ const t=smsTime(x.raw); if(t){ x.time=t; changed=true; } }
+    if(x.dir<0 && x.edit && x.edit.kind==='expense' && (!x.cat || x.cat==='Bank SMS')){ const c=categorize(x.raw); if(c){ x.cat=c; changed=true; } }
+  });
+  S.settings.retitled_v3=true;
+  if(changed) save(); else localStorage.setItem(LS,JSON.stringify(S));
+}
+
 /* ---------------- INIT ---------------- */
+retitleOldSms();          // re-extract merchant name/time for existing bank-SMS entries (once)
 runAutoSalary();          // add this month's salary automatically if due
 render();
 refreshFX();              // silent live FX on open
