@@ -232,7 +232,7 @@ const DEFAULT={
              gold21kJOD:47, goldUpdated:null, fxUpdated:null, liraGrams:8, lastBackup:null,
              cloudUrl:'', cloudKey:'', lastSync:null, lastCloudBackup:null, carRevUAE:850, carRevQatar:1000,
              monthlySalary:19250, salaryByMonth:{}, savingsByMonth:{'2026-06':12000},
-             carRevOverride:{'2026-05':10400}, expOverride:{'2026-05':28389},
+             carRevOverride:{'2026-05':10400}, expOverride:{'2026-05':28389}, catMemory:{},
              exitBasic:9000, exitStart:'2021-11-01',
              exitItems:[{name:'Nissan Patrol',value:25000},{name:'Cadillac Escalade',value:10000},{name:'Furniture',value:4000}] },
   updatedAt:0,
@@ -1293,7 +1293,8 @@ function saveEditTxn(id){
   if(!amount||amount<=0)return toast('Enter an amount');
   reverseEffects(x.effects);                                   // undo old money move
   if(x.edit.kind==='expense'){
-    if(catEl){ x.cat=catEl.value; x.catEdited=true; }
+    if(catEl){ x.cat=catEl.value; x.catEdited=true;
+      const k=merchantKey(x); if(k){ S.settings.catMemory=S.settings.catMemory||{}; S.settings.catMemory[k]=catEl.value; } }  // learn: this merchant → this category
     Object.assign(x,{amount,currency:cur,date,effects:null, title:det||x.cat||'Expense', sub:x.cat||'Expense'});
     x.edit={...x.edit,detail:det};
   }else{
@@ -1563,10 +1564,14 @@ function saveCloud(){
 function disconnectCloud(){ S.settings.cloudUrl=''; S.settings.cloudKey=''; localStorage.setItem(LS,JSON.stringify(S)); closeSheet(); toast('Disconnected'); }
 
 /* ---------------- EXPENSES BY CATEGORY ---------------- */
+/* a stable key for a merchant, used by the self-learning categoriser */
+function merchantKey(x){ const m = displayTitle(x) || x.title || ''; return (''+m).toLowerCase().replace(/[^a-z0-9؀-ۿ]+/g,' ').trim().slice(0,30); }
 function expenseCat(x){
-  if(x.catEdited && x.cat) return x.cat;              // user set it manually → keep it
-  const s=smsSource(x); if(s) return categorize(s);   // bank entries → always auto-categorise with the latest rules
-  return x.cat || 'General';                          // manual entries → their own category
+  if(x.catEdited && x.cat) return x.cat;              // user set it manually on this entry → keep it
+  const mem=S.settings.catMemory||{}, k=merchantKey(x);
+  if(k && mem[k]) return mem[k];                       // learned from a past correction for this merchant
+  const s=smsSource(x); if(s) return categorize(s);   // otherwise auto-categorise from the message
+  return x.cat || 'General';                           // manual entries → their own category
 }
 function sumQAR(arr){ return arr.reduce((s,x)=>s+toQAR(x.amount,x.currency),0); }
 function openExpenses(){
