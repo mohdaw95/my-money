@@ -360,7 +360,7 @@ function render(){
       <div class="em">🚗</div>
       <div class="mid">
         <div class="t">${esc(c.detail||'Car')} <span class="badge ${c.country==='UAE'?'uae':'qa'}">${c.country}</span></div>
-        <div class="s">${c.status==='receivable'?'Receivable':'Paid → '+accName(c.account)} · ${fmtDate(c.date)}</div>
+        <div class="s">${c.status==='receivable'?'Receivable':(c.account?'Received → '+accName(c.account):'Received')} · ${fmtDate(c.date)}</div>
       </div>
       <div style="text-align:right">
         <div class="amt ${c.status==='paid'?'pos':''}">${fmt(c.amount,c.currency)}</div>
@@ -786,21 +786,22 @@ function saveCar(){
 function markPaid(id){
   const c=S.cars.find(x=>x.id===id); if(!c)return;
   openSheet(`
-   <h2>Mark car as paid</h2>
+   <h2>✓ Mark car as received</h2>
    <div class="kv"><span>${esc(c.detail||'Car')} · ${c.country}</span><span>${fmt(c.amount,c.currency)}</span></div>
-   <label class="f">Transfer the amount into which account?</label>
-   <select id="mpAcc">${accountOptions('qDebit')}</select>
-   <p class="hint">The amount will be added to that account's balance.</p>
-   <button class="btn" onclick="doMarkPaid('${id}')">Confirm — money received</button>
+   <label class="f">Add the money to an account? (optional)</label>
+   <select id="mpAcc"><option value="">— No, just mark received —</option>${accountOptions('')}</select>
+   <p class="hint">Leave as "just mark received" if your balances already update from bank SMS. Pick an account only if you want to add this amount to a balance.</p>
+   <button class="btn" onclick="doMarkPaid('${id}')">✓ Received</button>
   `);
 }
 function doMarkPaid(id){
   const c=S.cars.find(x=>x.id===id); if(!c)return;
   const acc=document.getElementById('mpAcc').value;
-  c.effect=deposit(acc,c.amount,c.currency);   // effect stored on the car so delete/edit can reverse it
-  c.status='paid'; c.account=acc;
-  carTxnSync(c);                               // updates the linked activity note to "sold → account"
-  save(); closeSheet(); toast('Transferred to '+accName(acc));
+  if(acc){ c.effect=deposit(acc,c.amount,c.currency); c.account=acc; }   // optional: add to a balance
+  else { delete c.effect; c.account=null; }                              // just mark received, no money moved
+  c.status='paid';
+  carTxnSync(c);
+  save(); closeSheet(); toast(acc?('Received into '+accName(acc)):'Marked received');
 }
 function editCar(id){
   const c=S.cars.find(x=>x.id===id); if(!c)return; window._carC=c.country;
@@ -840,7 +841,7 @@ function openCars(){
   openSheet(`<h2>🚗 All cars</h2><div class="list">${list.length?list.map(c=>`
     <div class="item"><div class="em">🚗</div><div class="mid">
       <div class="t">${esc(c.detail||'Car')} <span class="badge ${c.country==='UAE'?'uae':'qa'}">${c.country}</span></div>
-      <div class="s">${c.status==='receivable'?'Receivable':'Paid → '+accName(c.account)} · ${fmtDate(c.date)}</div></div>
+      <div class="s">${c.status==='receivable'?'Receivable':(c.account?'Received → '+accName(c.account):'Received')} · ${fmtDate(c.date)}</div></div>
       <div style="text-align:right"><div class="amt">${fmt(c.amount,c.currency)}</div>
       ${c.currency!=='JOD'?`<div class="sub" style="font-size:11px">≈ ${fmt(fromQAR(toQAR(c.amount,c.currency),'JOD'),'JOD')}</div>`:''}
       ${c.status==='receivable'?`<button class="del" style="color:var(--green)" onclick="markPaid('${c.id}')">Mark paid →</button>`:''}
@@ -850,8 +851,8 @@ function openCars(){
 }
 function delCar(id){
   const c=S.cars.find(x=>x.id===id); if(!c)return;
-  if(!confirm('Delete this car?'+(c.status==='paid'?' The money it added to '+accName(c.account)+' will be put back.':'')))return;
-  if(c.status==='paid') reverseEffects([c.effect]);
+  if(!confirm('Delete this car?'+((c.status==='paid'&&c.account)?' The money it added to '+accName(c.account)+' will be put back.':'')))return;
+  if(c.status==='paid'&&c.effect) reverseEffects([c.effect]);
   carTxnRemove(id);                            // also remove the linked activity note
   S.cars=S.cars.filter(x=>x.id!==id); save(); closeSheet(); render(); toast('Deleted');
 }
@@ -1235,8 +1236,8 @@ function log(emoji,title,sub,amount,currency,dir,date,effects,edit){ S.txns.push
 function carTxnSync(c){
   const paid=c.status==='paid';
   const fields={emoji:'🚗',
-    title:(c.detail||'Car')+(paid?' (sold)':' (receivable)'),
-    sub:'Cars · '+c.country+(paid?' → '+accName(c.account):''),
+    title:(c.detail||'Car')+(paid?' (received)':' (receivable)'),
+    sub:'Cars · '+c.country+(paid&&c.account?' → '+accName(c.account):''),
     amount:c.amount,currency:c.currency,dir:paid?1:0,date:c.date,
     src:'car',srcId:c.id,effects:null,edit:null};
   let x=S.txns.find(t=>t.srcId===c.id);
