@@ -210,7 +210,7 @@ function routeAccount(raw, fallback){
   const low=(''+(raw||'')).toLowerCase();
   for(const r of SMS_ROUTES){ if(low.includes(r.match)) return r.acc; }
   if(fallback && fallback!=='qDebit') return fallback;              // explicit hint wins
-  if(/\bjod\b|dinar|دينار|الاردن|الأردن/.test(low)) return 'jDebit'; // Jordan by currency/keyword
+  if(/\bjod\b|\bjd\b|dinar|دينار|الاردن|الأردن|العربي/.test(low)) return 'jDebit'; // Jordan by currency/keyword/bank
   return fallback || 'qDebit';
 }
 /* revenue earned per exported car — editable rates in settings, plus optional per-car override (c.rev) */
@@ -272,6 +272,9 @@ function uid(){ return 'i'+Math.random().toString(36).slice(2,9); }
 /* ---------------- MONEY HELPERS ---------------- */
 const R=()=>({QAR:1, JOD:S.settings.rateJODtoQAR, AED:S.settings.rateAEDtoQAR, USD:S.settings.rateUSDtoQAR, ...(S.settings.rates||{})});
 function toQAR(a,c){ return a*(R()[c]||1); }
+function fromQAR(a,c){ return a/(R()[c]||1); }
+// normalize a currency token (incl. Arabic) to a 3-letter code
+function normCur(c){ c=(''+(c||'')).trim(); if(!c)return ''; const u=c.toUpperCase(); if(u==='JD')return 'JOD'; if(/دينار/.test(c))return 'JOD'; if(/ريال\s*قطري|ر\.?\s*ق/.test(c))return 'QAR'; if(/ريال/.test(c))return 'SAR'; return u; }
 function fromQAR(q,c){ return q/(R()[c]||1); }
 function fmt(n,cur='QAR',dec=0){ const v=(n<0?'-':'')+cur+' '+Math.abs(n).toLocaleString('en',{minimumFractionDigits:dec,maximumFractionDigits:dec}); return v; }
 function goldValueQAR(grams){ return toQAR(grams*S.settings.gold21kJOD,'JOD'); }
@@ -1215,6 +1218,9 @@ function smsMerchant(raw){
   return one(new RegExp('location\\s*[:\\-]\\s*(.+?)'+STOP,'i'))
       || one(/\bat\s+([A-Za-z0-9&'’.\- ]{2,45}?)(?:\s+on\b|\s+\d{1,2}[\/\-.]\d{1,2}|[.,\n]|$)/i)
       || one(new RegExp('(?:merchant|store|shop)\\s*[:\\-]\\s*(.+?)'+STOP,'i'))
+      // Arab Bank JO: "...من SAMA ALYAMON PHARMACY بمبلغ..." (merchant after من / لدى, before بمبلغ/بقيمة/بتاريخ)
+      || one(/(?:من|لدى)\s+([A-Za-z0-9&'’.\- ]{2,45}?)\s*(?:بمبلغ|بقيمة|بتاريخ|\bJOD\b|\bJD\b)/i)
+      || one(/\bfrom\s+([A-Za-z0-9&'’.\- ]{2,45}?)(?:\s+(?:for|amount|on)\b|[.,\n]|$)/i)
       || (/fawran/i.test(s) ? ((s.match(/to alias\s*[:\-]\s*(\S+)/i)||[])[1] ? 'Fawran → '+s.match(/to alias\s*[:\-]\s*(\S+)/i)[1] : 'Fawran transfer') : null)
       || (/\bdebited\b/i.test(s) ? 'Account debit' : null)
       || (/(credit|debit) card.*(purchase|used)|has been used/i.test(s) ? 'Card purchase' : null);   // fallback when the location wasn't saved
@@ -1222,12 +1228,12 @@ function smsMerchant(raw){
 /* time printed in the SMS, else null */
 function smsTime(raw){ const m=(''+(raw||'')).match(/\b(\d{1,2}:\d{2})(?::\d{2})?\s*(am|pm)?/i); return m? (m[1]+(m[2]?(' '+m[2].toUpperCase()):'')) : null; }
 /* the best available source text for a bank entry: the stored raw, or (for old entries) the title itself */
-function smsSource(x){ if(!x)return null; if(x.raw)return x.raw; return /^(your |account number|account was|fawran|has been used|current)/i.test(x.title||'')? x.title : null; }
+function smsSource(x){ if(!x)return null; if(x.raw)return x.raw; return /^(your |account number|account was|fawran|has been used|current)/i.test(x.title||'')||/تم قيد|حسابكم/.test(x.title||'')? x.title : null; }
 /* what to SHOW as the title — extracts the merchant live from a raw bank message,
    but leaves already-good or user-edited titles alone */
 function displayTitle(x){
   if(x.src==='car')return x.title;
-  const looksRaw=/^(your |account number|account was|fawran transfer|has been used|current)/i.test(x.title||'');
+  const looksRaw=/^(your |account number|account was|fawran transfer|has been used|current)/i.test(x.title||'')||/تم قيد|حسابكم/.test(x.title||'');
   if(looksRaw){ const s=smsSource(x); if(s){ const m=smsMerchant(s); if(m)return m; } }
   return x.title;
 }
@@ -1470,22 +1476,22 @@ async function doCloudRestore(which){
 function parseSms(raw){
   raw=(''+(raw||''));
   const norm=raw.replace(/[٠-٩]/g,d=>d.charCodeAt(0)-0x0660).replace(/[۰-۹]/g,d=>d.charCodeAt(0)-0x06F0);
-  // available/running balance: number after a "balance"/"رصيد" keyword
-  let availBalance=NaN;
-  const bm=norm.match(/(?:available\s*balance|avail\.?\s*bal\.?|balance|bal\.?|الرصيد(?:\s*المتاح)?|رصيد)\s*[:\-]?\s*(?:QAR|JOD|AED|SAR|USD|ر\.?ق|د\.?ا)?\s*([\d,]+(?:\.\d+)?)/i);
-  if(bm) availBalance=num(bm[1]);
+  const CURS='QAR|JOD|JD|AED|SAR|USD|EUR|GBP|KWD|BHD|OMR|TRY|INR|EGP|CAD|AUD';
+  // available/running balance: number near a "balance"/"الرصيد" keyword (allow a word like المتوفر/available in between)
+  let availBalance=NaN, balCur='';
+  const bm=norm.match(new RegExp('(?:available\\s*balance|avail\\.?\\s*bal\\.?|balance|bal\\.?|الرصيد(?:\\s*(?:المتوفر|المتاح))?|رصيد)[^0-9]{0,20}?(?:('+CURS+')\\s*)?([\\d,]+(?:\\.\\d+)?)\\s*('+CURS+'|دينار|ريال)?','i'));
+  if(bm){ availBalance=num(bm[2]); balCur=normCur(bm[1]||bm[3]||''); }
   // transaction amount + its currency (prefer a number next to a currency code — avoids the "2" in VISA2)
-  const CURS='QAR|JOD|AED|SAR|USD|EUR|GBP|KWD|BHD|OMR|TRY|INR|EGP|CAD|AUD';
   let amount=NaN, amtCur='QAR';
   let am=norm.match(new RegExp('('+CURS+')\\s*([\\d,]+(?:\\.\\d+)?)','i'));
-  if(am){ amtCur=am[1].toUpperCase(); amount=num(am[2]); }
-  else { am=norm.match(new RegExp('([\\d,]+(?:\\.\\d+)?)\\s*('+CURS+')','i')); if(am){ amount=num(am[1]); amtCur=am[2].toUpperCase(); } }
+  if(am){ amtCur=normCur(am[1]); amount=num(am[2]); }
+  else { am=norm.match(new RegExp('([\\d,]+(?:\\.\\d+)?)\\s*('+CURS+')','i')); if(am){ amount=num(am[1]); amtCur=normCur(am[2]); } }
   if(isNaN(amount)){ const any=norm.match(/([\d,]+\.\d{1,2}|\d{2,}[\d,]*)/); if(any) amount=num(any[1]); }
   // NB: "credited" = money in; plain "credit" (as in "credit card") must NOT count as income
   const credit=/credited|deposit|received|salary|refund|reversal|\bcr\b|إيداع|اضاف|راتب|استلام|مستلم/i.test(raw);
   const debit=/debited|\bdebit\b|purchase|withdraw|spent|deducted|payment|\bpos\b|paid|\bused\b|شراء|سحب|خصم|دفع|مشترى/i.test(raw);
   const type = (credit && !debit) ? 'income' : 'expense';
-  return {amount,amtCur,availBalance,type};
+  return {amount,amtCur,availBalance,balCur,type};
 }
 /* auto-categorise an expense from its merchant / message text */
 const CATEGORIES=['General','Groceries','Food & Dining','Fuel','Transport','Bills','Shopping','Health','Entertainment','Travel','ATM / Cash','Transfer','Car costs','Rent','Other'];
@@ -1509,8 +1515,8 @@ function applyInboxItem(it){
   const rawAmount=(it.amount!=null && it.amount!=='')?num(it.amount):p.amount;
   const acc=routeAccount(it.raw, it.account);       // pick the card from the identifier in the text
   const accCur=accCurrency(acc);
-  const msgCur=((it.currency||'')+'').toUpperCase() || p.amtCur || accCur;   // currency the transaction was in
-  const amount= (rawAmount && rawAmount>0) ? toQAR(rawAmount,msgCur) : rawAmount;  // ALWAYS store the amount in QAR
+  const msgCur=normCur(it.currency) || p.amtCur || accCur;   // currency the transaction was in
+  const amount= (rawAmount && rawAmount>0) ? Math.round(toQAR(rawAmount,msgCur)*100)/100 : rawAmount;  // ALWAYS store the amount in QAR (2dp)
   const cur='QAR';
   const type=it.type||p.type||'expense';
   const merchant=smsMerchant(it.raw);
@@ -1535,7 +1541,9 @@ function applyInboxItem(it){
   // reflect the balance: the bank's available balance is the source of truth (in the account's own currency).
   // otherwise only income adds — expenses never reduce the balance / net worth (tracked for budgeting only).
   if(hasBalance){
-    S.accounts[acc]=p.availBalance;
+    // store the balance in the account's own currency (convert if the SMS quoted a different one)
+    const bCur=p.balCur||accCur;
+    S.accounts[acc]= (bCur===accCur) ? p.availBalance : Math.round(fromQAR(toQAR(p.availBalance,bCur),accCur)*100)/100;
   }else if(hasAmount && type==='income'){
     S.accounts[acc]+= fromQAR(toQAR(rawAmount,msgCur), accCur);
   }
