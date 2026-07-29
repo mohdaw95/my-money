@@ -263,7 +263,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-07-29-bulkreceive';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-07-29-expcard';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -334,7 +334,9 @@ function render(){
   const cmCarData = carRevByMonth()[curMonth()]||{total:0,count:0};
   const cmRev = cmCarData.total;
   const cmCount = cmCarData.count;
-  const cmExp = S.txns.filter(x=>x.dir<0 && (x.date||'').slice(0,7)===curMonth()).reduce((s,x)=>s+toQAR(x.amount,x.currency),0);
+  const _cmExpOv=(S.settings.expOverride||{})[curMonth()];
+  const cmExp = (_cmExpOv!=null && _cmExpOv!=='') ? (+_cmExpOv||0)
+    : S.txns.filter(x=>x.dir<0 && (x.date||'').slice(0,7)===curMonth()).reduce((s,x)=>s+toQAR(x.amount,x.currency),0);
   const cmSavings = savingsForMonth(curMonth());
   document.getElementById('cards').innerHTML=
     ACCTS.map(a=>{ const bal=S.accounts[a.key]||0; return `
