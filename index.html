@@ -263,7 +263,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-07-29-freshadopt';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-07-29-carshistory';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -900,18 +900,37 @@ function saveEditCar(id){
   carTxnSync(c);                               // keep the linked activity note in sync
   save(); closeSheet(); render(); toast('Updated');
 }
-function openCars(){
-  const list=S.cars;
-  openSheet(`<h2>🚗 All cars</h2><div class="list">${list.length?list.map(c=>`
-    <div class="item"><div class="em">🚗</div><div class="mid">
+function carRow(c,received){
+  return `<div class="item"><div class="em">🚗</div><div class="mid">
       <div class="t">${esc(c.detail||'Car')} <span class="badge ${c.country==='UAE'?'uae':'qa'}">${c.country}</span></div>
-      <div class="s">${c.status==='receivable'?'Receivable':(c.account?'Received → '+accName(c.account):'Received')} · ${fmtDate(c.date)}</div></div>
-      <div style="text-align:right"><div class="amt">${fmt(c.amount,c.currency)}</div>
+      <div class="s">${received?(c.account?'✓ Received → '+accName(c.account):'✓ Received'):'Receivable'} · ${fmtDate(c.date)}</div></div>
+      <div style="text-align:right"><div class="amt ${received?'pos':''}">${fmt(c.amount,c.currency)}</div>
       ${c.currency!=='JOD'?`<div class="sub" style="font-size:11px">≈ ${fmt(fromQAR(toQAR(c.amount,c.currency),'JOD'),'JOD')}</div>`:''}
-      ${c.status==='receivable'?`<button class="del" style="color:var(--green)" onclick="markPaid('${c.id}')">Mark paid →</button>`:''}
+      ${!received?`<button class="del" style="color:var(--green)" onclick="markPaid('${c.id}')">Mark paid →</button>`:''}
       <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editCar('${c.id}')">Edit</button><button class="del" onclick="delCar('${c.id}')">Delete</button></div></div>
-    </div>`).join(''):'<div class="empty">No cars.</div>'}</div>
-    <button class="btn ghost" onclick="openCarAdd()">+ Add car</button>`);
+    </div>`;
+}
+function openCars(){
+  const bydate=(a,b)=>(b.date||'').localeCompare(a.date||'');
+  const pending=S.cars.filter(c=>c.status==='receivable').slice().sort(bydate);
+  const paid=S.cars.filter(c=>c.status!=='receivable');
+  const pendTot=pending.reduce((s,c)=>s+toQAR(c.amount,c.currency),0);
+  const paidTot=paid.reduce((s,c)=>s+toQAR(c.amount,c.currency),0);
+  // group received (history) by month, newest month first
+  const byMonth={}; paid.forEach(c=>{ const mo=(c.date||today()).slice(0,7); (byMonth[mo]=byMonth[mo]||[]).push(c); });
+  const months=Object.keys(byMonth).sort().reverse();
+  openSheet(`
+   <h2>🚗 Cars</h2>
+   <div class="kv"><span style="font-weight:800;color:var(--green)">📥 Receivable · ${pending.length} pending</span><span style="font-weight:800;color:var(--green)">${fmt(pendTot,'QAR')}</span></div>
+   <div class="list" style="margin-top:6px">${pending.length?pending.map(c=>carRow(c,false)).join(''):'<div class="empty">Nothing pending — all received 🎉</div>'}</div>
+   ${paid.length?`
+   <div class="kv" style="margin-top:16px"><span style="font-weight:800">✓ Received · history</span><span style="font-weight:800;color:var(--green)">${fmt(paidTot,'QAR')}</span></div>
+   ${months.map(mo=>{ const cs=byMonth[mo].slice().sort(bydate); const mt=cs.reduce((s,c)=>s+toQAR(c.amount,c.currency),0);
+     return `<div class="kv" style="margin-top:8px;border-bottom:2px solid var(--line)"><span style="font-weight:700;opacity:.75">${monthLabel(mo)} · ${cs.length} car${cs.length!==1?'s':''}</span><span style="font-weight:700;color:var(--green)">${fmt(mt,'QAR')}</span></div>
+     <div class="list" style="margin-top:6px;opacity:.72">${cs.map(c=>carRow(c,true)).join('')}</div>`;
+   }).join('')}`:''}
+   <button class="btn ghost" style="margin-top:14px" onclick="openCarAdd()">+ Add car</button>
+  `);
 }
 function delCar(id){
   const c=S.cars.find(x=>x.id===id); if(!c)return;
