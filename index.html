@@ -262,6 +262,18 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
+const APP_VERSION='2026-07-29-arabbank-2';   // bump on every deploy so phones auto-refresh
+// self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
+async function checkUpdate(){
+  try{
+    const r=await fetch('index.html?_ck='+Date.now(),{cache:'no-store'});
+    const t=await r.text();
+    const m=t.match(/APP_VERSION='([^']+)'/);
+    if(m && m[1] && m[1]!==APP_VERSION){
+      if(!sessionStorage.getItem('upd_'+m[1])){ sessionStorage.setItem('upd_'+m[1],'1'); location.replace('index.html?v='+encodeURIComponent(m[1])); }
+    }
+  }catch(e){}
+}
 let S = load();
 function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)); if(d){ return migrate({...clone(DEFAULT),...d, settings:{...DEFAULT.settings,...(d.settings||{})}, accounts:{...DEFAULT.accounts,...(d.accounts||{})}}); } }catch(e){} return clone(DEFAULT); }
 function save(){ S.updatedAt=Date.now(); localStorage.setItem(LS, JSON.stringify(S)); render(); cloudPushSoon(); }
@@ -1789,6 +1801,7 @@ runAutoSalary();          // add this month's salary automatically if due
 render();
 refreshFX();              // silent live FX on open
 syncCloud();              // pull cloud state + bank-SMS inbox on open (if connected)
+checkUpdate();            // auto-load a newer deployed version if one is live
 // Auto gold refresh once per day
 (function(){ const last=S.settings.goldUpdated||0; if(Date.now()-last>20*60*60*1000){ /* attempt quietly */
   fetch('https://api.gold-api.com/price/XAU').then(r=>r.json()).then(j=>{ if(j&&j.price){
