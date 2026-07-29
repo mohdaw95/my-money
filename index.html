@@ -263,7 +263,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-07-29-expcard';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-07-29-expviews';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -1684,27 +1684,51 @@ function openExpMonths(){
      : '<div class="empty">No expenses yet.</div>'}</div>
   `);
 }
+let _expView='newest';   // newest | cat | day | high
+function setExpView(mo,v){ _expView=v; openExpMonth(mo); }
+function expTs(x){ const d=+((x.date||'').replace(/-/g,''))||0; let t=0; const m=(x.time||'').match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i); if(m){ let h=+m[1]; const ap=(m[3]||'').toLowerCase(); if(ap==='pm'&&h<12)h+=12; if(ap==='am'&&h===12)h=0; t=h*60+ +m[2]; } return d*10000+t; }
+function expItemRow(x){
+  return `<div class="item"><div class="em">${x.emoji||'🧾'}</div>
+    <div class="mid${smsSource(x)?' tap':''}" ${smsSource(x)?`onclick="showRawMsg('${x.id}')"`:''}><div class="t">${esc(displayTitle(x))}${smsSource(x)?' <span class="dim" style="font-size:12px">💬</span>':''}</div>
+    <div class="s">${x.edit&&x.edit.account?accName(x.edit.account)+' · ':''}${fmtDate(x.date)}${x.time?' · '+x.time:''}</div></div>
+    <div style="text-align:right"><div class="amt neg">${fmt(x.amount,x.currency)}</div>
+    <button class="del" style="color:var(--accent)" onclick="editTxn('${x.id}')">Edit</button></div></div>`;
+}
 function openExpMonth(mo){
   _sheetBack=()=>openExpMonth(mo);
   const items=S.txns.filter(x=>x.dir<0 && (x.date||'').slice(0,7)===mo);
-  const groups={}; items.forEach(x=>{ const c=expenseCat(x); (groups[c]=groups[c]||[]).push(x); });
-  const cats=Object.keys(groups).sort((a,b)=>sumQAR(groups[b])-sumQAR(groups[a]));
+  const pos=new Map(items.map((x,i)=>[x.id,i]));
+  const byNew=(a,b)=> (expTs(b)-expTs(a)) || (pos.get(b.id)-pos.get(a.id));
+  const byHigh=(a,b)=> toQAR(b.amount,b.currency)-toQAR(a.amount,a.currency);
   const g=expByMonth()[mo]||{total:sumQAR(items)};
+  let body;
+  if(!items.length){ body='<div class="empty">No expenses this month.</div>'; }
+  else if(_expView==='cat'){
+    const groups={}; items.forEach(x=>{ const c=expenseCat(x); (groups[c]=groups[c]||[]).push(x); });
+    const cats=Object.keys(groups).sort((a,b)=>sumQAR(groups[b])-sumQAR(groups[a]));
+    body=cats.map(c=>`
+      <div class="kv" style="margin-top:8px;border-bottom:2px solid var(--line)"><span style="font-weight:700">${esc(c)}</span><span style="font-weight:700;color:var(--red)">${fmt(sumQAR(groups[c]),'QAR')}</span></div>
+      <div class="list" style="margin-top:6px">${groups[c].slice().sort(byNew).map(expItemRow).join('')}</div>`).join('');
+  } else if(_expView==='day'){
+    const days={}; items.forEach(x=>{ const d=x.date||today(); (days[d]=days[d]||[]).push(x); });
+    const ds=Object.keys(days).sort().reverse();
+    body=ds.map(d=>`
+      <div class="kv" style="margin-top:8px;border-bottom:2px solid var(--line)"><span style="font-weight:700">${fmtDate(d)}</span><span style="font-weight:700;color:var(--red)">${fmt(sumQAR(days[d]),'QAR')}</span></div>
+      <div class="list" style="margin-top:6px">${days[d].slice().sort(byHigh).map(expItemRow).join('')}</div>`).join('');
+  } else {
+    body=`<div class="list" style="margin-top:6px">${items.slice().sort(_expView==='high'?byHigh:byNew).map(expItemRow).join('')}</div>`;
+  }
+  const seg=(v,l)=>`<button class="${_expView===v?'on':''}" onclick="setExpView('${mo}','${v}')">${l}</button>`;
   openSheet(`
    <h2>🧾 ${monthLabel(mo)}</h2>
    <div class="kv"><span style="font-weight:800">Total spent${g.override?' <span class="badge">manual</span>':''}</span><span style="font-weight:800;color:var(--red)">${fmt(g.total,'QAR')}</span></div>
    <label class="f">✎ Set month total manually (QAR)</label>
    <input id="expOv" type="text" inputmode="decimal" value="${(S.settings.expOverride||{})[mo]!=null?(S.settings.expOverride||{})[mo]:''}" placeholder="leave blank to auto-total">
    <button class="btn" style="margin-top:8px" onclick="saveMonthOverride('expOverride','${mo}','expOv',openExpMonth)">Save total</button>
-   ${cats.length? cats.map(c=>`
-     <div class="kv" style="margin-top:8px;border-bottom:2px solid var(--line)"><span style="font-weight:700">${esc(c)}</span><span style="font-weight:700;color:var(--red)">${fmt(sumQAR(groups[c]),'QAR')}</span></div>
-     <div class="list" style="margin-top:6px">${groups[c].map(x=>`
-       <div class="item"><div class="em">${x.emoji}</div><div class="mid${smsSource(x)?' tap':''}" ${smsSource(x)?`onclick="showRawMsg('${x.id}')"`:''}><div class="t">${esc(displayTitle(x))}${smsSource(x)?' <span class="dim" style="font-size:12px">💬</span>':''}</div>
-       <div class="s">${x.edit&&x.edit.account?accName(x.edit.account)+' · ':''}${fmtDate(x.date)}${x.time?' · '+x.time:''}</div></div>
-       <div style="text-align:right"><div class="amt neg">${fmt(x.amount,x.currency)}</div>
-       <button class="del" style="color:var(--accent)" onclick="editTxn('${x.id}')">Edit</button></div></div>`).join('')}</div>`).join('')
-     : '<div class="empty">No expenses this month.</div>'}
-   <button class="btn ghost" onclick="openExpMonths()">← All months</button>
+   <label class="f" style="margin-top:12px">View</label>
+   <div class="seg">${seg('newest','Newest')}${seg('cat','Category')}${seg('day','By day')}${seg('high','Highest')}</div>
+   ${body}
+   <button class="btn ghost" style="margin-top:10px" onclick="openExpMonths()">← All months</button>
   `);
 }
 
