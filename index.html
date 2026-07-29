@@ -263,7 +263,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-07-29-expviews';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-07-29-freshadopt';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -1483,7 +1483,9 @@ async function syncCloud(opts){
     const r=await fetch(base+'/state',{headers:cloudHeaders()});
     if(r.status===401){ if(opts.manual)toast('Wrong secret key'); return; }
     const d=await r.json();
-    if(d.state && (d.updatedAt||0) > (S.updatedAt||0)){        // remote is newer → adopt
+    // adopt cloud when it's newer OR when this device is basically empty (e.g. a fresh home-screen install)
+    const localEmpty = (S.cars||[]).length===0 && (S.txns||[]).length<3 && Object.values(S.accounts||{}).every(v=>!v);
+    if(d.state && ((d.updatedAt||0) > (S.updatedAt||0) || localEmpty)){        // remote is newer → adopt
       S={...clone(DEFAULT),...d.state}; localStorage.setItem(LS,JSON.stringify(S));
       retitleOldSms();                                        // re-title merchants on the freshly-adopted data
       render();
