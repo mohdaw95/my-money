@@ -210,7 +210,7 @@ function routeAccount(raw, fallback){
   const low=(''+(raw||'')).toLowerCase();
   for(const r of SMS_ROUTES){ if(low.includes(r.match)) return r.acc; }
   if(fallback && fallback!=='qDebit') return fallback;              // explicit hint wins
-  if(/\bjod\b|\bjd\b|dinar|دينار|الاردن|الأردن|العربي/.test(low)) return 'jDebit'; // Jordan by currency/keyword/bank
+  if(/\bjod\b|\bjd\b|dinar|دينار|الاردن|الأردن|العربي|الرصيد\s*المتوفر/.test(low)) return 'jDebit'; // Jordan by currency/keyword/bank (الرصيد المتوفر = Arab Bank JO)
   return fallback || 'qDebit';
 }
 /* revenue earned per exported car — editable rates in settings, plus optional per-car override (c.rev) */
@@ -262,7 +262,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-07-29-arabbank-2';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-07-29-arabbank-3';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
