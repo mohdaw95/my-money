@@ -34,6 +34,19 @@ export default {
       }
       if (req.method === 'PUT') {
         const body = await req.text();
+        // anti-wipe guard: never let a near-empty state clobber a populated one
+        try {
+          const incoming = JSON.parse(body);
+          const prevRaw = await env.STORE.get('state');
+          if (prevRaw) {
+            const prev = JSON.parse(prevRaw);
+            const pc = (prev.cars || []).length, ic = (incoming.cars || []).length;
+            const pt = (prev.txns || []).length, it = (incoming.txns || []).length;
+            if ((pc > 0 && ic === 0) || (pt >= 10 && it < pt / 2)) {
+              return json({ ok: false, rejected: true, reason: 'anti-wipe: refused to overwrite fuller data' });
+            }
+          }
+        } catch (e) {}
         await env.STORE.put('state', body);
         await env.STORE.put('updatedAt', '' + Date.now());
         return json({ ok: true });
