@@ -263,7 +263,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-07-29-carshistory';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-07-29-skipotp';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -1592,7 +1592,11 @@ const CAT_RULES=[
 ];
 function categorize(text){ const s=''+(text||''); for(const [cat,re] of CAT_RULES){ if(re.test(s)) return cat; } return 'General'; }
 function catOptions(sel){ const list=[...CATEGORIES]; if(sel && !list.includes(sel)) list.unshift(sel); return list.map(c=>`<option ${sel===c?'selected':''}>${esc(c)}</option>`).join(''); }
+/* OTP / verification texts carry the transfer amount but are NOT a real debit — must be skipped
+   so a Fawran (or any) transfer isn't counted twice (once for the OTP, once for the actual debit) */
+function isOtp(raw){ return /\botp\b|one[\s-]?time\s+(password|passcode|pin|code)|verification\s+code|\bpasscode\b|security\s+code|رمز\s*التحقق|رمز\s*الدخول|كلمة\s*المرور\s*لمرة|رمز\s*لمرة|لا\s*تشاركه?|رمز\s*سري/i.test(''+(raw||'')); }
 function applyInboxItem(it){
+  if(isOtp(it.raw)) return false;   // skip OTP/verification messages entirely
   const p=parseSms(it.raw);
   const rawAmount=(it.amount!=null && it.amount!=='')?num(it.amount):p.amount;
   const acc=routeAccount(it.raw, it.account);       // pick the card from the identifier in the text
