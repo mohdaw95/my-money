@@ -263,7 +263,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-08-04-categories';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-08-04-catfix';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -1583,13 +1583,15 @@ const CAT_RULES=[
   ['Fuel', /woqod|petrol|\bfuel\b|filling station|\bstation\b|\bgas\b/i],
   ['Transport', /karwa|\btaxi\b|\buber\b|careem|\bmetro\b|\bbus\b|parking|mowasalat|salik|\bnol\b|limousine|car rental|rent a car|hertz|\bavis\b|\bcab\b/i],
   ['Bills', /ooredoo|vodafone|kahramaa|electricity|\bwater\b|utility|\bbill\b|internet|postpaid|recharge|telecom|\bdu\b|\bfee\b/i],
-  ['Health', /pharmacy|hospital|clinic|medical|\baster\b|naseem|kulud|dental|\bdr\.?\b|\bhealth\b|wellness|optic|labaih|hamad medical|\bcare\b|\blab\b/i],
-  ['Entertainment', /cinema|\bvox\b|\bnovo\b|netflix|spotify|playstation|\bgame\b|\bsteam\b|shahid|\bosn\b|adventure|\bcastle\b|\bpark\b|kidzania|gondolania|bowling|\bticket\b|amusement|angry birds|\bfun\b|arcade|\btoys?\b|entertainment/i],
+  ['Health', /pharmacy|\bhospital\b|clinic|medical|\baster\b|naseem|kulud|dental|\bdr\.?\b|\bhealth\b|wellness|optic|labaih|hamad medical|\bcare\b|\blab\b/i],
+  ['Entertainment', /cinema|\bvox\b|\bnovo\b|netflix|spotify|playstation|\bgame\b|\bsteam\b|shahid|\bosn\b|adventure|\bcastle\b|\bpark\b|kidzania|gondolania|bowling|\bticket\b|amusement|angry birds|\bfun\b|arcade|\btoys?\b|entertainment|\bbeach\b|beach club|\bpool\b|\bspa\b|hospitality|\bclub\b|\blounge\b/i],
   ['Travel', /qatar airways|airways|airline|\bflight\b|\bhotel\b|booking|agoda|airbnb|intercontinental|marriott|hilton|sheraton|radisson|movenpick|\bresort\b|\btravel\b|\btour\b|kempinski|\britz\b|four seasons|\binn\b|mondrian|banana island|\bqia\b/i],
   ['ATM / Cash', /\batm\b|cash withdrawal|withdrawal/i],
   ['Transfer', /\btransfer\b|fawran|remittance|western union|moneygram/i],
-  ['Shopping', /\bmall\b|\bikea\b|h&m|\bzara\b|centrepoint|centre\s?point|home\s?centre|amazon|\bnoon\b|virgin|apple\s?store|ounass|namshi|sephora|\bmax\b|splash|waikiki|decathlon|jarir|electronics|\btrad\b|trading|\bstore\b|boutique|fashion|clothing|jewell|watches|hamleys|\blego\b|brands|outlet|\bmart\b|\bgift\b|\bshoes?\b|\bnike\b|adidas|shein|\bh\s?and\s?m\b|home\s?box|\bpan\s?emirates\b/i],
+  ['Shopping', /\bmall\b|\bikea\b|h&m|\bzara\b|centrepoint|centre\s?point|home\s?centre|amazon|\bnoon\b|virgin|apple\s?store|ounass|namshi|sephora|\bmax\b|splash|waikiki|decathlon|jarir|electronics|\btrad\b|trading|\bstore\b|boutique|fashion|clothing|jewell|watches|hamleys|\blego\b|brands|outlet|\bmart\b|\bgift\b|\bshoes?\b|\bnike\b|adidas|shein|\bh\s?and\s?m\b|home\s?box|\bpan\s?emirates\b|cosmetics|\bbeauty\b|perfume|makeup|\bmuhtasib\b/i],
 ];
+// Food rule: also catch generic food-place words
+CAT_RULES[1][1]=new RegExp(CAT_RULES[1][1].source+'|\\bpies\\b|\\bshawaya\\b|\\bmatbakh\\b|\\bmandi\\b|\\bmalik\\b','i');
 function categorize(text){ const s=''+(text||''); for(const [cat,re] of CAT_RULES){ if(re.test(s)) return cat; } return 'General'; }
 function remapCat(c){ const r=S.settings.catRename||{}; return r[c]||c; }        // display name after any rename
 function catList(){ const seen=new Set(),out=[]; const add=c=>{ c=(''+c).trim(); if(c&&!seen.has(c)){seen.add(c);out.push(c);} }; CATEGORIES.forEach(c=>add(remapCat(c))); (S.settings.customCats||[]).forEach(c=>add(remapCat(c))); return out; }
@@ -1650,6 +1652,34 @@ function deleteCat(i){
   (S.txns||[]).forEach(x=>{ if(x.cat===c||x.cat===orig){ x.cat='General'; } });   // reassign its entries
   const mem=S.settings.catMemory||{}; Object.keys(mem).forEach(k=>{ if(mem[k]===c||mem[k]===orig) delete mem[k]; });
   save(); openCatManager(); toast('Deleted “'+c+'”');
+}
+/* ---- train categories per merchant: set once, applies to all past + future ---- */
+function mkey(x){ return merchantKey(x)||('id:'+x.id); }
+function openCatFix(){
+  _sheetBack=openCatFix;
+  const exps=S.txns.filter(x=>x.dir<0);
+  const g={};
+  exps.forEach(x=>{ const k=mkey(x); if(!g[k])g[k]={key:k,name:displayTitle(x)||x.title||'—',items:[]}; g[k].items.push(x); });
+  let rows=Object.values(g).map(r=>({key:r.key,name:r.name,total:sumQAR(r.items),n:r.items.length,cat:expenseCat(r.items[0])}));
+  rows.sort((a,b)=> (b.cat==='General')-(a.cat==='General') || b.total-a.total);   // uncategorised first, then biggest spend
+  window._catFix=rows;
+  const gen=rows.filter(r=>r.cat==='General').length;
+  openSheet(`
+   <h2>🎯 Fix categories</h2>
+   <p class="hint" style="margin-top:0">Pick the right category for each merchant — it's remembered and applied to <b>all</b> past &amp; future transactions from that merchant. ${gen?('<b style="color:var(--red)">'+gen+'</b> still uncategorised (shown first).'):'All categorised 🎉'}</p>
+   <div class="list">${rows.length?rows.map((r,i)=>`
+     <div class="item"><div class="em">${r.cat==='General'?'❓':'🏷️'}</div>
+       <div class="mid"><div class="t">${esc(r.name)}</div>
+       <div class="s">${r.n} txn${r.n!==1?'s':''} · ${fmt(r.total,'QAR')}</div></div>
+       <div><select onchange="setMerchantCat(${i},this.value)">${catOptions(r.cat)}</select></div>
+     </div>`).join(''):'<div class="empty">No expenses yet.</div>'}</div>
+  `);
+}
+function setMerchantCat(i,cat){
+  const r=(window._catFix||[])[i]; if(!r)return;
+  S.settings.catMemory=S.settings.catMemory||{}; S.settings.catMemory[r.key]=cat;   // learn merchant → category
+  S.txns.forEach(x=>{ if(x.dir<0 && mkey(x)===r.key){ x.cat=cat; x.catEdited=false; } });   // apply to every txn of this merchant
+  r.cat=cat; save(); toast(r.name+' → '+cat);
 }
 /* OTP / verification texts carry the transfer amount but are NOT a real debit — must be skipped
    so a Fawran (or any) transfer isn't counted twice (once for the OTP, once for the actual debit) */
@@ -1724,8 +1754,12 @@ function expenseCat(x){
   if(x.catEdited && x.cat) return remapCat(x.cat);              // user set it manually on this entry → keep it
   const mem=S.settings.catMemory||{}, k=merchantKey(x);
   if(k && mem[k]) return remapCat(mem[k]);                       // learned from a past correction for this merchant
-  const s=smsSource(x); if(s) return remapCat(categorize(s));   // otherwise auto-categorise from the message
-  return remapCat(x.cat || 'General');                           // manual entries → their own category
+  // auto: match the MERCHANT name first (most reliable), then fall back to the whole message
+  const name=displayTitle(x)||x.title||'';
+  let c=categorize(name);
+  if(c==='General'){ const s=smsSource(x); if(s){ const c2=categorize(s); if(c2!=='General') c=c2; } }
+  if(c==='General' && x.cat) c=x.cat;                           // manual entries → their own category
+  return remapCat(c);
 }
 function sumQAR(arr){ return arr.reduce((s,x)=>s+toQAR(x.amount,x.currency),0); }
 function openExpenses(){
@@ -1736,7 +1770,7 @@ function openExpenses(){
   openSheet(`
    <h2>🧾 Expenses by category</h2>
    <div class="kv"><span style="font-weight:800">Total spent</span><span style="font-weight:800;color:var(--red)">${fmt(sumQAR(exps),'QAR')}</span></div>
-   <button class="btn ghost" style="margin-top:8px" onclick="openCatManager()">🏷️ Add / rename categories</button>
+   <div class="row" style="gap:8px;margin-top:8px"><button class="btn ghost" style="flex:1" onclick="openCatFix()">🎯 Fix categories</button><button class="btn ghost" style="flex:1" onclick="openCatManager()">🏷️ Add / rename</button></div>
    ${cats.length? cats.map(c=>`
      <div class="kv" style="margin-top:8px;border-bottom:2px solid var(--line)"><span style="font-weight:700">${esc(c)}</span><span style="font-weight:700;color:var(--red)">${fmt(sumQAR(groups[c]),'QAR')}</span></div>
      <div class="list" style="margin-top:6px">${groups[c].map(x=>`
