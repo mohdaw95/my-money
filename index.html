@@ -209,9 +209,10 @@ const SMS_ROUTES=[
 ];
 function routeAccount(raw, fallback){
   const low=(''+(raw||'')).toLowerCase();
+  // Arab Bank Jordan markers take priority over any qDebit hint (their SMS carry the 600*0139 account, JOD/دينار, الرصيد, CliQ/كليك)
+  if(/jod\b|\bjd\b|dinar|دينار|الاردن|الأردن|العربي|الرصيد|كليك|cliq|600\s*\*\s*0139/.test(low)) return 'jDebit';
   for(const r of SMS_ROUTES){ if(low.includes(r.match)) return r.acc; }
   if(fallback && fallback!=='qDebit') return fallback;              // explicit hint wins
-  if(/\bjod\b|\bjd\b|dinar|دينار|الاردن|الأردن|العربي|الرصيد\s*المتوفر/.test(low)) return 'jDebit'; // Jordan by currency/keyword/bank (الرصيد المتوفر = Arab Bank JO)
   return fallback || 'qDebit';
 }
 /* revenue earned per exported car — editable rates in settings, plus optional per-car override (c.rev) */
@@ -263,7 +264,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-08-04-catfix';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-08-05-jordanroute';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -1587,7 +1588,7 @@ const CAT_RULES=[
   ['Entertainment', /cinema|\bvox\b|\bnovo\b|netflix|spotify|playstation|\bgame\b|\bsteam\b|shahid|\bosn\b|adventure|\bcastle\b|\bpark\b|kidzania|gondolania|bowling|\bticket\b|amusement|angry birds|\bfun\b|arcade|\btoys?\b|entertainment|\bbeach\b|beach club|\bpool\b|\bspa\b|hospitality|\bclub\b|\blounge\b/i],
   ['Travel', /qatar airways|airways|airline|\bflight\b|\bhotel\b|booking|agoda|airbnb|intercontinental|marriott|hilton|sheraton|radisson|movenpick|\bresort\b|\btravel\b|\btour\b|kempinski|\britz\b|four seasons|\binn\b|mondrian|banana island|\bqia\b/i],
   ['ATM / Cash', /\batm\b|cash withdrawal|withdrawal/i],
-  ['Transfer', /\btransfer\b|fawran|remittance|western union|moneygram/i],
+  ['Transfer', /\btransfer\b|fawran|remittance|western union|moneygram|كليك|\bcliq\b|دفعة/i],
   ['Shopping', /\bmall\b|\bikea\b|h&m|\bzara\b|centrepoint|centre\s?point|home\s?centre|amazon|\bnoon\b|virgin|apple\s?store|ounass|namshi|sephora|\bmax\b|splash|waikiki|decathlon|jarir|electronics|\btrad\b|trading|\bstore\b|boutique|fashion|clothing|jewell|watches|hamleys|\blego\b|brands|outlet|\bmart\b|\bgift\b|\bshoes?\b|\bnike\b|adidas|shein|\bh\s?and\s?m\b|home\s?box|\bpan\s?emirates\b|cosmetics|\bbeauty\b|perfume|makeup|\bmuhtasib\b/i],
 ];
 // Food rule: also catch generic food-place words
