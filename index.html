@@ -141,7 +141,10 @@
   <div class="hero">
     <div class="between">
       <div class="lbl">Total net worth</div>
-      <button onclick="openSettings()" style="background:transparent;color:var(--muted);font-size:18px">⚙︎</button>
+      <div class="row" style="gap:14px;align-items:center">
+        <button onclick="openSellers()" style="background:transparent;color:var(--muted);font-size:18px" title="Sellers">👥</button>
+        <button onclick="openSettings()" style="background:transparent;color:var(--muted);font-size:18px">⚙︎</button>
+      </div>
     </div>
     <div class="net" id="netWorth">QAR 0<small></small></div>
     <div class="herostats tap" id="heroStats" onclick="openBreakdown()"></div>
@@ -239,7 +242,7 @@ const DEFAULT={
              exitItems:[{name:'Nissan Patrol',value:25000},{name:'Cadillac Escalade',value:10000},{name:'Furniture',value:4000}] },
   updatedAt:0,
   accounts:{ qDebit:0, qCredit:0, qPrepaid:0, jDebit:0, cash:0 },
-  gold:[], cars:[], pr:[], txns:[], salary:null, carRevEntries:[]
+  gold:[], cars:[], pr:[], txns:[], salary:null, carRevEntries:[], sellers:[]
 };
 /* migrate old 2-account data (main→qDebit, jordan→jDebit) to the new 3-card model */
 function migrate(s){
@@ -264,7 +267,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-08-05-jordanroute';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-08-05-sellers';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -751,10 +754,27 @@ function carRecvPreview(){
   const el=document.getElementById('carRecvTotal'); if(el) el.textContent=fmt(t,'QAR');
   return t;
 }
-function openCarAdd(){
-  window._carC='Qatar';
+function openCarAdd(presetSeller){
+  window._carC='Qatar'; window._carDeal='done';
+  const sellers=S.sellers||[];
   openSheet(`
    <h2>🚗 Add car (receivable)</h2>
+   <label class="f">Seller</label>
+   <select id="carSeller" onchange="carSellerChange()">
+     <option value="">— No seller —</option>
+     ${sellers.map(s=>`<option value="${s.id}" ${presetSeller===s.id?'selected':''}>${esc(s.name)}${s.country?' ('+s.country+')':''}</option>`).join('')}
+     <option value="__new__">＋ Add new seller…</option>
+   </select>
+   <div id="newSellerBox" class="hide">
+     <label class="f">New seller name</label><input id="nsName" placeholder="Seller name">
+     <label class="f">New seller WhatsApp</label><input id="nsNum" type="tel" inputmode="tel" placeholder="e.g. 33123456">
+   </div>
+   <label class="f">Deal status</label>
+   <div class="seg" id="carDealSeg">
+     <button type="button" data-deal="negotiation" onclick="carDealPick('negotiation')">🟡 Negotiation</button>
+     <button type="button" class="on" data-deal="done" onclick="carDealPick('done')">🟢 Done</button>
+     <button type="button" data-deal="lost" onclick="carDealPick('lost')">🔴 Lost</button>
+   </div>
    <label class="f">Title</label><input id="carDet" placeholder="e.g. Cross Syrian">
    <label class="f">Country</label>
    <div class="seg"><button id="cq-Qatar" class="on" onclick="carCAdd('Qatar')">🇶🇦 Qatar</button><button id="cq-UAE" onclick="carCAdd('UAE')">🇦🇪 UAE</button></div>
@@ -764,6 +784,8 @@ function openCarAdd(){
   `);
   carRecvPreview();
 }
+function carSellerChange(){ const v=document.getElementById('carSeller').value; document.getElementById('newSellerBox').classList.toggle('hide',v!=='__new__'); }
+function carDealPick(d){ window._carDeal=d; document.querySelectorAll('#carDealSeg button').forEach(b=>b.classList.toggle('on',b.dataset.deal===d)); }
 function carCountryUI(country){
   document.getElementById('cq-Qatar').classList.toggle('on',country==='Qatar');
   document.getElementById('cq-UAE').classList.toggle('on',country==='UAE');
@@ -800,7 +822,16 @@ function saveCar(){
   const insp=country==='Qatar'?(num(document.getElementById('carInsp').value)||0):0;
   const amount=comm+dep+insp+trans;
   if(amount<=0)return toast('Enter the amounts');
-  const c={id:uid(),amount,currency:'QAR',country,status:'receivable',detail:det,date,commission:comm,deposit:dep,inspection:insp,transfer:trans};
+  // seller: existing, or create a new one inline
+  let sellerId=(document.getElementById('carSeller')||{}).value||'';
+  if(sellerId==='__new__'){
+    const nm=(document.getElementById('nsName').value||'').trim(), nn=(document.getElementById('nsNum').value||'').trim();
+    if(nm){ sellerId=uid(); S.sellers=S.sellers||[]; S.sellers.push({id:sellerId,name:nm,number:nn,country,createdAt:today()}); }
+    else sellerId='';
+  }
+  const deal=window._carDeal||'done';
+  const c={id:uid(),amount,currency:'QAR',country,status:'receivable',detail:det,date,commission:comm,deposit:dep,inspection:insp,transfer:trans,deal};
+  if(sellerId) c.sellerId=sellerId;
   S.cars.push(c); carTxnSync(c);
   save(); closeSheet(); toast('Car added · receivable '+fmt(amount,'QAR'));
 }
@@ -869,12 +900,16 @@ function doBulkReceive(){
   save(); closeSheet(); toast(acc?(n+' cars received into '+accName(acc)):(n+' cars marked received'));
 }
 function editCar(id){
-  const c=S.cars.find(x=>x.id===id); if(!c)return; window._carC=c.country;
+  const c=S.cars.find(x=>x.id===id); if(!c)return; window._carC=c.country; window._carDeal=c.deal||'done';
   openSheet(`
    <h2>✎ Edit car</h2>
    <label class="f">Country</label>
    <div class="seg"><button id="cq-Qatar" class="${c.country==='Qatar'?'on':''}" onclick="carC('Qatar')">🇶🇦 Qatar</button><button id="cq-UAE" class="${c.country==='UAE'?'on':''}" onclick="carC('UAE')">🇦🇪 UAE</button></div>
    <label class="f">Title</label><input id="carDet" value="${esc(c.detail||'')}">
+   <label class="f">Seller</label>
+   <select id="carSeller"><option value="">— No seller —</option>${(S.sellers||[]).map(s=>`<option value="${s.id}" ${c.sellerId===s.id?'selected':''}>${esc(s.name)}${s.country?' ('+s.country+')':''}</option>`).join('')}</select>
+   <label class="f">Deal status</label>
+   <div class="seg" id="carDealSeg">${['negotiation','done','lost'].map(d=>`<button type="button" data-deal="${d}" class="${(c.deal||'done')===d?'on':''}" onclick="carDealPick('${d}')">${d==='negotiation'?'🟡 Negotiation':d==='done'?'🟢 Done':'🔴 Lost'}</button>`).join('')}</div>
    ${carFormFields(c)}
    <label class="f">Date</label><input type="date" id="carDate" value="${c.date}">
    ${c.status==='paid'?`<label class="f">Paid into account</label><select id="carAcc">${accountOptions(c.account)}</select>`:''}
@@ -897,9 +932,96 @@ function saveEditCar(id){
     const acc=document.getElementById('carAcc').value;
     c.effect=deposit(acc,amount,'QAR'); c.account=acc;
   }
-  Object.assign(c,{amount,currency:'QAR',detail:det,date,country:window._carC,commission:comm,deposit:dep,inspection:insp,transfer:trans});
+  const sellerId=(document.getElementById('carSeller')||{}).value||'';
+  Object.assign(c,{amount,currency:'QAR',detail:det,date,country:window._carC,commission:comm,deposit:dep,inspection:insp,transfer:trans,deal:window._carDeal||'done'});
+  if(sellerId) c.sellerId=sellerId; else delete c.sellerId;
   carTxnSync(c);                               // keep the linked activity note in sync
   save(); closeSheet(); render(); toast('Updated');
+}
+/* =============== SELLERS (simple CRM for car suppliers) =============== */
+const DEALS=[['negotiation','🟡 Negotiation'],['done','🟢 Done'],['lost','🔴 Lost']];
+let _editSeller=null;
+function sellerById(id){ return (S.sellers||[]).find(s=>s.id===id); }
+function sellerCars(id){ return S.cars.filter(c=>c.sellerId===id); }
+function intlNum(n,country){ let d=(''+(n||'')).replace(/\D/g,''); const cc=country==='UAE'?'971':'974'; if(d.startsWith('00'))d=d.slice(2); if(d.startsWith(cc))return d; return cc+d.replace(/^0+/,''); }
+function sellerWaLink(s){ return 'https://wa.me/'+intlNum(s.number,s.country)+'?text='+encodeURIComponent('Hi 👋 do you have any new cars?'); }
+function sellerWa(id){ const s=sellerById(id); if(!s)return; if(!s.number)return toast('No WhatsApp number for this seller'); window.open(sellerWaLink(s),'_blank'); }
+function openSellers(){
+  _sheetBack=openSellers;
+  const list=S.sellers||[];
+  openSheet(`
+   <h2>👥 Sellers</h2>
+   <p class="hint" style="margin-top:0">Your car suppliers. Tap one to see cars from them, or message them for new stock.</p>
+   <button class="btn" onclick="addSeller()">＋ Add seller</button>
+   ${list.some(s=>s.number)?`<button class="btn ghost" onclick="messageAllSellers()">📲 Message all — “any new cars?”</button>`:''}
+   <div class="list" style="margin-top:8px">${list.length?list.map(s=>{
+     const cars=sellerCars(s.id), open=cars.filter(c=>c.status==='receivable').length;
+     return `<div class="item tap" onclick="openSeller('${s.id}')"><div class="em">${s.country==='UAE'?'🇦🇪':'🇶🇦'}</div>
+       <div class="mid"><div class="t">${esc(s.name||'Seller')}</div><div class="s">${esc(s.number||'no number')} · ${cars.length} car${cars.length!==1?'s':''}${open?' · '+open+' pending':''}</div></div>
+       <div class="row" style="gap:10px;align-items:center">${s.number?`<span class="del" style="color:#25D366" onclick="event.stopPropagation();sellerWa('${s.id}')">WhatsApp</span>`:''}<span class="s" style="color:var(--accent)">open ›</span></div></div>`;
+   }).join(''):'<div class="empty">No sellers yet. Add your first car supplier.</div>'}</div>
+  `);
+}
+function addSeller(){ _editSeller=null; sellerForm({country:'Qatar'}); }
+function editSeller(id){ const s=sellerById(id); if(!s)return; _editSeller=id; sellerForm(s); }
+function sellerForm(s){
+  window._selC=s.country||'Qatar';
+  openSheet(`
+   <h2>${_editSeller?'✎ Edit seller':'＋ Add seller'}</h2>
+   <label class="f">Name</label><input id="selName" value="${esc(s.name||'')}" placeholder="Seller name">
+   <label class="f">WhatsApp number</label><input id="selNum" type="tel" inputmode="tel" value="${esc(s.number||'')}" placeholder="e.g. 33123456">
+   <label class="f">Country</label>
+   <div class="seg"><button type="button" id="sc-Qatar" class="${window._selC==='Qatar'?'on':''}" onclick="selCountry('Qatar')">🇶🇦 Qatar</button><button type="button" id="sc-UAE" class="${window._selC==='UAE'?'on':''}" onclick="selCountry('UAE')">🇦🇪 UAE</button></div>
+   <button class="btn" onclick="saveSeller()">Save</button>
+   ${_editSeller?`<button class="btn red" onclick="delSeller('${_editSeller}')">Delete seller</button>`:'<button class="btn ghost" onclick="openSellers()">← Back</button>'}
+  `);
+}
+function selCountry(c){ window._selC=c; document.getElementById('sc-Qatar').classList.toggle('on',c==='Qatar'); document.getElementById('sc-UAE').classList.toggle('on',c==='UAE'); }
+function saveSeller(){
+  const name=document.getElementById('selName').value.trim();
+  const number=document.getElementById('selNum').value.trim();
+  const country=window._selC||'Qatar';
+  if(!name)return toast('Enter a name');
+  if(_editSeller){ Object.assign(sellerById(_editSeller),{name,number,country}); }
+  else { S.sellers=S.sellers||[]; S.sellers.push({id:uid(),name,number,country,createdAt:today()}); }
+  save(); openSellers(); toast('Saved');
+}
+function delSeller(id){
+  sellerCars(id).forEach(c=>{ delete c.sellerId; });   // keep the cars, just unlink them
+  S.sellers=(S.sellers||[]).filter(s=>s.id!==id); _editSeller=null;
+  save(); openSellers(); toast('Seller deleted (cars kept)');
+}
+function setCarDeal(id,deal){ const c=S.cars.find(x=>x.id===id); if(!c)return; c.deal=deal; save(); if(c.sellerId)openSeller(c.sellerId); }
+function sellerCarRow(c){
+  return `<div class="item"><div class="em">🚗</div>
+    <div class="mid"><div class="t">${esc(c.detail||'Car')} <span class="badge ${c.country==='UAE'?'uae':'qa'}">${c.country}</span></div>
+    <div class="s">${c.status==='receivable'?'Receivable':'Received'} · ${fmt(c.amount,c.currency)} · ${fmtDate(c.date)}</div></div>
+    <div class="row" style="gap:8px;align-items:center"><select onchange="setCarDeal('${c.id}',this.value)">${DEALS.map(d=>`<option value="${d[0]}" ${(c.deal||'done')===d[0]?'selected':''}>${d[1]}</option>`).join('')}</select><button class="del" style="color:var(--accent)" onclick="editCar('${c.id}')">Edit</button></div></div>`;
+}
+function openSeller(id){
+  const s=sellerById(id); if(!s)return openSellers();
+  _sheetBack=()=>openSeller(id);
+  const cars=sellerCars(id);
+  const grp={negotiation:[],done:[],lost:[]}; cars.forEach(c=>{ (grp[c.deal||'done']=grp[c.deal||'done']||[]).push(c); });
+  const sec=(k,l)=>{ const cs=grp[k]||[]; return cs.length?`<div class="kv" style="margin-top:12px;border-bottom:2px solid var(--line)"><span style="font-weight:700">${l}</span><span class="s">${cs.length} · ${fmt(sumQAR(cs),'QAR')}</span></div><div class="list">${cs.map(sellerCarRow).join('')}</div>`:''; };
+  openSheet(`
+   <h2>${s.country==='UAE'?'🇦🇪':'🇶🇦'} ${esc(s.name||'Seller')}</h2>
+   <div class="s" style="margin-top:-4px">${esc(s.number||'no number')} · ${cars.length} car${cars.length!==1?'s':''}</div>
+   ${s.number?`<button class="btn" style="background:#25D366;color:#062e16;margin-top:10px" onclick="sellerWa('${id}')">🟢 WhatsApp — “any new cars?”</button>`:''}
+   <div class="row" style="gap:8px"><button class="btn ghost" style="flex:1" onclick="openCarAdd('${id}')">＋ Add car</button><button class="btn ghost" style="flex:1" onclick="editSeller('${id}')">✎ Edit</button></div>
+   ${cars.length?(sec('negotiation','🟡 Negotiation')+sec('done','🟢 Done')+sec('lost','🔴 Lost')):'<div class="empty">No cars from this seller yet. Tap “Add car”.</div>'}
+   <button class="btn ghost" style="margin-top:12px" onclick="openSellers()">← All sellers</button>
+  `);
+}
+function messageAllSellers(){
+  _sheetBack=openSellers;
+  const list=(S.sellers||[]).filter(s=>s.number);
+  openSheet(`
+   <h2>📲 Message all sellers</h2>
+   <p class="hint" style="margin-top:0">Tap each to send <b>“Hi 👋 do you have any new cars?”</b> on WhatsApp. WhatsApp opens one chat at a time — send, come back, tap the next.</p>
+   <div class="list">${list.map(s=>`<div class="item"><div class="em">${s.country==='UAE'?'🇦🇪':'🇶🇦'}</div><div class="mid"><div class="t">${esc(s.name)}</div><div class="s">${esc(s.number)}</div></div><button class="btn" style="width:auto;padding:0 18px;background:#25D366;color:#062e16" onclick="sellerWa('${s.id}')">Send</button></div>`).join('')}</div>
+   <button class="btn ghost" onclick="openSellers()">← Back</button>
+  `);
 }
 function carRow(c,received){
   return `<div class="item"><div class="em">🚗</div><div class="mid">
