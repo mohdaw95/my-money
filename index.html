@@ -267,7 +267,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-08-05-inspect-bulk';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-08-05-diff-buyprice';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -281,7 +281,19 @@ async function checkUpdate(){
 }
 let S = load();
 function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)); if(d){ return migrate({...clone(DEFAULT),...d, settings:{...DEFAULT.settings,...(d.settings||{})}, accounts:{...DEFAULT.accounts,...(d.accounts||{})}}); } }catch(e){} return clone(DEFAULT); }
-function save(){ S.updatedAt=Date.now(); localStorage.setItem(LS, JSON.stringify(S)); render(); cloudPushSoon(); }
+function accountsTotalQAR(){ let t=0; ACCTS.forEach(a=>{ t+=toQAR(S.accounts[a.key]||0,a.cur); }); return t; }
+function recordDailyBalance(){ try{ S.settings.balByDay=S.settings.balByDay||{}; S.settings.balByDay[today()]=Math.round(accountsTotalQAR()); }catch(e){} }
+/* change in total account balances across a month (first day → last day) */
+function monthBalanceDiff(mo){
+  const bd=S.settings.balByDay||{}; const dates=Object.keys(bd).sort(); if(!dates.length) return null;
+  const inMo=dates.filter(d=>d.slice(0,7)===mo);
+  const closing = mo===curMonth() ? Math.round(accountsTotalQAR()) : (inMo.length?bd[inMo[inMo.length-1]]:null);
+  const before=dates.filter(d=>d < mo+'-01');
+  const opening = before.length ? bd[before[before.length-1]] : (inMo.length?bd[inMo[0]]:null);
+  if(closing==null||opening==null) return null;
+  return {opening,closing,diff:closing-opening};
+}
+function save(){ S.updatedAt=Date.now(); recordDailyBalance(); localStorage.setItem(LS, JSON.stringify(S)); render(); cloudPushSoon(); }
 let _pushT=null;
 function cloudPushSoon(){ if(!S.settings.cloudUrl)return; clearTimeout(_pushT); _pushT=setTimeout(()=>cloudPush(),1500); }
 function uid(){ return 'i'+Math.random().toString(36).slice(2,9); }
@@ -744,6 +756,7 @@ function carFormFields(c){
   const d=carDefaults(country);
   const v=(f)=> (c[f]!=null && c[f]!=='') ? c[f] : d[f];
   return `
+   <label class="f">Buying price (QAR) · reference only</label><input id="carBuy" type="text" inputmode="decimal" value="${c.buyPrice!=null&&c.buyPrice!==''?c.buyPrice:''}" placeholder="not counted in any total">
    <label class="f">Commission (QAR)</label><input id="carComm" type="text" inputmode="decimal" value="${v('commission')}" oninput="carRecvPreview()">
    <div id="carQatarOnly" class="${country==='Qatar'?'':'hide'}">
      <label class="f">Deposit (QAR)</label><input id="carDep" type="text" inputmode="decimal" value="${v('deposit')}" oninput="carRecvPreview()">
@@ -866,7 +879,8 @@ function saveCar(){
     else sellerId='';
   }
   const deal=window._carDeal||'done';
-  const c={id:uid(),amount,currency:'QAR',country,status:'receivable',detail:det,date,commission:comm,deposit:dep,inspection:insp,transfer:trans,deal};
+  const buy=num((document.getElementById('carBuy')||{}).value)||0;   // reference only, not in amount
+  const c={id:uid(),amount,currency:'QAR',country,status:'receivable',detail:det,date,commission:comm,deposit:dep,inspection:insp,transfer:trans,deal,buyPrice:buy};
   if(sellerId) c.sellerId=sellerId;
   S.cars.push(c); carTxnSync(c);
   save(); closeSheet(); toast('Car added · receivable '+fmt(amount,'QAR'));
@@ -969,7 +983,8 @@ function saveEditCar(id){
     c.effect=deposit(acc,amount,'QAR'); c.account=acc;
   }
   const sellerId=(document.getElementById('carSeller')||{}).value||'';
-  Object.assign(c,{amount,currency:'QAR',detail:det,date,country:window._carC,commission:comm,deposit:dep,inspection:insp,transfer:trans,deal:window._carDeal||'done'});
+  const buy=num((document.getElementById('carBuy')||{}).value)||0;
+  Object.assign(c,{amount,currency:'QAR',detail:det,date,country:window._carC,commission:comm,deposit:dep,inspection:insp,transfer:trans,deal:window._carDeal||'done',buyPrice:buy});
   if(sellerId) c.sellerId=sellerId; else delete c.sellerId;
   carTxnSync(c);                               // keep the linked activity note in sync
   save(); closeSheet(); render(); toast('Updated');
@@ -1031,7 +1046,7 @@ function setCarDeal(id,deal){ const c=S.cars.find(x=>x.id===id); if(!c)return; c
 function sellerCarRow(c){
   return `<div class="item"><div class="em">🚗</div>
     <div class="mid" style="min-width:0">${carTitleHtml(c)}
-    <div class="s">${c.status==='receivable'?'Receivable':'Received'} · ${fmt(c.amount,c.currency)} · ${fmtDate(c.date)}</div></div>
+    <div class="s">${c.status==='receivable'?'Receivable':'Received'} · ${fmt(c.amount,c.currency)}${c.buyPrice?' · buy '+fmt(c.buyPrice,'QAR'):''} · ${fmtDate(c.date)}</div></div>
     <div class="row" style="gap:8px;align-items:center"><select onchange="setCarDeal('${c.id}',this.value)">${DEALS.map(d=>`<option value="${d[0]}" ${(c.deal||'done')===d[0]?'selected':''}>${d[1]}</option>`).join('')}</select><button class="del" style="color:var(--accent)" onclick="editCar('${c.id}')">Edit</button></div></div>`;
 }
 function openSeller(id){
@@ -1068,7 +1083,7 @@ function carTitleHtml(c){
 function carRow(c,received){
   return `<div class="item"><div class="em">🚗</div><div class="mid" style="min-width:0">
       ${carTitleHtml(c)}
-      <div class="s">${received?(c.account?'✓ Received → '+accName(c.account):'✓ Received'):'Receivable'} · ${fmtDate(c.date)}</div></div>
+      <div class="s">${received?(c.account?'✓ Received → '+accName(c.account):'✓ Received'):'Receivable'} · ${fmtDate(c.date)}${c.buyPrice?' · buy '+fmt(c.buyPrice,'QAR'):''}</div></div>
       <div style="text-align:right"><div class="amt ${received?'pos':''}">${fmt(c.amount,c.currency)}</div>
       ${c.currency!=='JOD'?`<div class="sub" style="font-size:11px">≈ ${fmt(fromQAR(toQAR(c.amount,c.currency),'JOD'),'JOD')}</div>`:''}
       ${!received?`<button class="del" style="color:var(--green)" onclick="markPaid('${c.id}')">Mark paid →</button>`:''}
@@ -2030,6 +2045,7 @@ function openExpMonth(mo){
   openSheet(`
    <h2>🧾 ${monthLabel(mo)}</h2>
    <div class="kv"><span style="font-weight:800">Total spent${g.override?' <span class="badge">manual</span>':''}</span><span style="font-weight:800;color:var(--red)">${fmt(g.total,'QAR')}</span></div>
+   ${(()=>{ const b=monthBalanceDiff(mo); return b?`<div class="kv"><span style="font-weight:700">Difference (accounts)</span><span style="font-weight:700;color:${b.diff>=0?'var(--green)':'var(--red)'}">${b.diff>=0?'+':'−'}${fmt(Math.abs(b.diff),'QAR')}</span></div><p class="hint" style="margin-top:2px">Total balance ${fmt(b.opening,'QAR')} (start) → ${fmt(b.closing,'QAR')} (${mo===curMonth()?'now':'end'})</p>`:''; })()}
    <label class="f">✎ Set month total manually (QAR)</label>
    <input id="expOv" type="text" inputmode="decimal" value="${(S.settings.expOverride||{})[mo]!=null?(S.settings.expOverride||{})[mo]:''}" placeholder="leave blank to auto-total">
    <button class="btn" style="margin-top:8px" onclick="saveMonthOverride('expOverride','${mo}','expOv',openExpMonth)">Save total</button>
@@ -2181,6 +2197,7 @@ function retitleOldSms(){
 /* ---------------- INIT ---------------- */
 retitleOldSms();          // re-extract merchant name/time for existing bank-SMS entries (once)
 runAutoSalary();          // add this month's salary automatically if due
+recordDailyBalance();     // snapshot today's total balance for the monthly Difference field
 render();
 refreshFX();              // silent live FX on open
 syncCloud();              // pull cloud state + bank-SMS inbox on open (if connected)
