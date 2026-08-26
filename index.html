@@ -188,8 +188,8 @@
 </div>
 
 <!-- ============ SHEET ============ -->
-<div class="scrim" id="scrim" onclick="if(event.target===this)closeSheet()">
-  <div class="sheet" id="sheet"><div class="grab"></div><button class="sheetX" onclick="closeSheet()" aria-label="Close">✕</button><div id="sheetBody"></div></div>
+<div class="scrim" id="scrim" onclick="if(event.target===this)sheetX()">
+  <div class="sheet" id="sheet"><div class="grab"></div><button class="sheetX" onclick="sheetX()" aria-label="Close">✕</button><div id="sheetBody"></div></div>
 </div>
 <div class="toast" id="toast"></div>
 
@@ -267,7 +267,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-08-05-sellers';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-08-05-inspect-bulk';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -375,13 +375,16 @@ function render(){
       <div class="sub">salary + car rev − exp</div>
     </div>`;
 
-  // cars list
-  const cars=[...S.cars].sort((a,b)=>(a.status>b.status?1:-1));
+  // cars list — pending (receivable) first, then newest date first
+  const cars=[...S.cars].sort((a,b)=>{
+    const ap=a.status==='receivable'?0:1, bp=b.status==='receivable'?0:1;
+    return ap!==bp ? ap-bp : (b.date||'').localeCompare(a.date||'');
+  });
   document.getElementById('carsList').innerHTML = cars.length? cars.map(c=>`
     <div class="item">
       <div class="em">🚗</div>
       <div class="mid">
-        <div class="t">${esc(c.detail||'Car')} <span class="badge ${c.country==='UAE'?'uae':'qa'}">${c.country}</span></div>
+        ${carTitleHtml(c)}
         <div class="s">${c.status==='receivable'?'Receivable':(c.account?'Received → '+accName(c.account):'Received')} · ${fmtDate(c.date)}</div>
       </div>
       <div style="text-align:right">
@@ -443,8 +446,10 @@ function timeAgo(ts){ const m=Math.round((Date.now()-ts)/60000); if(m<60)return 
 function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1900); }
 
 /* ---------------- SHEET FRAMEWORK ---------------- */
-function openSheet(html){ document.getElementById('sheetBody').innerHTML=html; document.getElementById('scrim').classList.add('open'); }
-function closeSheet(){ document.getElementById('scrim').classList.remove('open'); }
+let _onClose=null;   // per-sheet close handler (the ✕ / scrim uses it); null = plain close to home
+function openSheet(html,onClose){ _onClose=onClose||null; document.getElementById('sheetBody').innerHTML=html; document.getElementById('scrim').classList.add('open'); }
+function closeSheet(){ _onClose=null; document.getElementById('scrim').classList.remove('open'); }
+function sheetX(){ if(_onClose){ const f=_onClose; f(); } else closeSheet(); }   // ✕ mirrors the sheet's own Close
 function accountOptions(sel){ return ACCTS.map(a=>`<option value="${a.key}"${sel===a.key?' selected':''}>${a.ic} ${a.name} (${a.cur})</option>`).join(''); }
 function curOptions(sel){ return ['QAR','JOD','AED','USD'].map(c=>`<option ${sel===c?'selected':''}>${c}</option>`).join(''); }
 function dateField(id){ return `<label class="f">Date</label><input type="date" id="${id}" value="${today()}">`; }
@@ -758,29 +763,40 @@ function openCarAdd(presetSeller){
   window._carC='Qatar'; window._carDeal='done';
   const sellers=S.sellers||[];
   openSheet(`
-   <h2>🚗 Add car (receivable)</h2>
-   <label class="f">Seller</label>
-   <select id="carSeller" onchange="carSellerChange()">
-     <option value="">— No seller —</option>
-     ${sellers.map(s=>`<option value="${s.id}" ${presetSeller===s.id?'selected':''}>${esc(s.name)}${s.country?' ('+s.country+')':''}</option>`).join('')}
-     <option value="__new__">＋ Add new seller…</option>
-   </select>
-   <div id="newSellerBox" class="hide">
-     <label class="f">New seller name</label><input id="nsName" placeholder="Seller name">
-     <label class="f">New seller WhatsApp</label><input id="nsNum" type="tel" inputmode="tel" placeholder="e.g. 33123456">
+   <h2 id="carAddTitle">🚗 Add car (receivable)</h2>
+   <label class="f">Type</label>
+   <div class="seg">
+     <button type="button" id="cq-Qatar" class="on" onclick="carCAdd('Qatar')">🇶🇦 Qatar</button>
+     <button type="button" id="cq-UAE" onclick="carCAdd('UAE')">🇦🇪 UAE</button>
+     <button type="button" id="cq-Inspection" onclick="carCAdd('Inspection')">🔍 Inspection</button>
    </div>
-   <label class="f">Deal status</label>
-   <div class="seg" id="carDealSeg">
-     <button type="button" data-deal="negotiation" onclick="carDealPick('negotiation')">🟡 Negotiation</button>
-     <button type="button" class="on" data-deal="done" onclick="carDealPick('done')">🟢 Done</button>
-     <button type="button" data-deal="lost" onclick="carDealPick('lost')">🔴 Lost</button>
+   <div id="carInspFields" class="hide">
+     <label class="f">Title</label><input id="inspTitle" placeholder="e.g. Inspection – Cross Syrian">
+     <label class="f">Amount (QAR)</label><input id="inspAmt" type="text" inputmode="decimal" value="100">
+     <p class="hint">Adds an <b>“I owe”</b> payable with this title &amp; amount. Not counted as a car or pending.</p>
    </div>
-   <label class="f">Title</label><input id="carDet" placeholder="e.g. Cross Syrian">
-   <label class="f">Country</label>
-   <div class="seg"><button id="cq-Qatar" class="on" onclick="carCAdd('Qatar')">🇶🇦 Qatar</button><button id="cq-UAE" onclick="carCAdd('UAE')">🇦🇪 UAE</button></div>
-   ${carFormFields(carDefaults('Qatar'))}
+   <div id="carNormalFields">
+     <label class="f">Seller</label>
+     <select id="carSeller" onchange="carSellerChange()">
+       <option value="">— No seller —</option>
+       ${sellers.map(s=>`<option value="${s.id}" ${presetSeller===s.id?'selected':''}>${esc(s.name)}${s.country?' ('+s.country+')':''}</option>`).join('')}
+       <option value="__new__">＋ Add new seller…</option>
+     </select>
+     <div id="newSellerBox" class="hide">
+       <label class="f">New seller name</label><input id="nsName" placeholder="Seller name">
+       <label class="f">New seller WhatsApp</label><input id="nsNum" type="tel" inputmode="tel" placeholder="e.g. 33123456">
+     </div>
+     <label class="f">Deal status</label>
+     <div class="seg" id="carDealSeg">
+       <button type="button" data-deal="negotiation" onclick="carDealPick('negotiation')">🟡 Negotiation</button>
+       <button type="button" class="on" data-deal="done" onclick="carDealPick('done')">🟢 Done</button>
+       <button type="button" data-deal="lost" onclick="carDealPick('lost')">🔴 Lost</button>
+     </div>
+     <label class="f">Title</label><input id="carDet" placeholder="e.g. Cross Syrian">
+     ${carFormFields(carDefaults('Qatar'))}
+   </div>
    ${dateField('carDate')}
-   <button class="btn" onclick="saveCar()">Save as receivable</button>
+   <button class="btn" id="carSaveBtn" onclick="saveCar()">Save as receivable</button>
   `);
   carRecvPreview();
 }
@@ -791,9 +807,19 @@ function carCountryUI(country){
   document.getElementById('cq-UAE').classList.toggle('on',country==='UAE');
   const q=document.getElementById('carQatarOnly'); if(q) q.classList.toggle('hide',country!=='Qatar');
 }
-/* country toggle in the ADD form re-fills the country defaults */
+/* type toggle in the ADD form: Qatar / UAE fill car defaults; Inspection switches to a single-amount payable */
 function carCAdd(country){
-  window._carC=country; carCountryUI(country);
+  window._carC=country;
+  const insp=country==='Inspection';
+  document.getElementById('cq-Qatar').classList.toggle('on',country==='Qatar');
+  document.getElementById('cq-UAE').classList.toggle('on',country==='UAE');
+  const bI=document.getElementById('cq-Inspection'); if(bI) bI.classList.toggle('on',insp);
+  document.getElementById('carNormalFields').classList.toggle('hide',insp);
+  document.getElementById('carInspFields').classList.toggle('hide',!insp);
+  const btn=document.getElementById('carSaveBtn'); if(btn) btn.textContent=insp?'Save inspection (I owe)':'Save as receivable';
+  const ttl=document.getElementById('carAddTitle'); if(ttl) ttl.textContent=insp?'🔍 Add inspection':'🚗 Add car (receivable)';
+  if(insp) return;
+  const q=document.getElementById('carQatarOnly'); if(q) q.classList.toggle('hide',country!=='Qatar');
   const d=carDefaults(country);
   document.getElementById('carComm').value=d.commission;
   document.getElementById('carDep').value=d.deposit;
@@ -813,8 +839,18 @@ function carC(country){
   }
   carRecvPreview();
 }
+function saveInspection(){
+  const title=(document.getElementById('inspTitle').value||'').trim();
+  const amount=num(document.getElementById('inspAmt').value)||0;
+  if(amount<=0)return toast('Enter the amount');
+  const date=document.getElementById('carDate').value||today();
+  S.pr=S.pr||[];
+  S.pr.push({id:uid(),type:'payable',name:title||'Inspection',amount,currency:'QAR',detail:'Inspection',date});
+  save(); closeSheet(); toast('Inspection added to “I owe” · '+fmt(amount,'QAR'));
+}
 function saveCar(){
   const country=window._carC||'Qatar';
+  if(country==='Inspection') return saveInspection();   // inspection → payable, not a car
   const det=document.getElementById('carDet').value.trim();
   const date=document.getElementById('carDate').value||today();
   const comm=num(document.getElementById('carComm').value)||0, trans=num(document.getElementById('carTrans').value)||0;
@@ -994,7 +1030,7 @@ function delSeller(id){
 function setCarDeal(id,deal){ const c=S.cars.find(x=>x.id===id); if(!c)return; c.deal=deal; save(); if(c.sellerId)openSeller(c.sellerId); }
 function sellerCarRow(c){
   return `<div class="item"><div class="em">🚗</div>
-    <div class="mid"><div class="t">${esc(c.detail||'Car')} <span class="badge ${c.country==='UAE'?'uae':'qa'}">${c.country}</span></div>
+    <div class="mid" style="min-width:0">${carTitleHtml(c)}
     <div class="s">${c.status==='receivable'?'Receivable':'Received'} · ${fmt(c.amount,c.currency)} · ${fmtDate(c.date)}</div></div>
     <div class="row" style="gap:8px;align-items:center"><select onchange="setCarDeal('${c.id}',this.value)">${DEALS.map(d=>`<option value="${d[0]}" ${(c.deal||'done')===d[0]?'selected':''}>${d[1]}</option>`).join('')}</select><button class="del" style="color:var(--accent)" onclick="editCar('${c.id}')">Edit</button></div></div>`;
 }
@@ -1023,9 +1059,15 @@ function messageAllSellers(){
    <button class="btn ghost" onclick="openSellers()">← Back</button>
   `);
 }
+/* car title with the country badge ALWAYS visible — the name ellipsizes, the badge never gets cut off */
+function carTitleHtml(c){
+  return `<div class="t" style="display:flex;align-items:center;gap:6px;min-width:0">
+    <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${esc(c.detail||'Car')}</span>
+    <span class="badge ${c.country==='UAE'?'uae':'qa'}" style="flex:none">${c.country}</span></div>`;
+}
 function carRow(c,received){
-  return `<div class="item"><div class="em">🚗</div><div class="mid">
-      <div class="t">${esc(c.detail||'Car')} <span class="badge ${c.country==='UAE'?'uae':'qa'}">${c.country}</span></div>
+  return `<div class="item"><div class="em">🚗</div><div class="mid" style="min-width:0">
+      ${carTitleHtml(c)}
       <div class="s">${received?(c.account?'✓ Received → '+accName(c.account):'✓ Received'):'Receivable'} · ${fmtDate(c.date)}</div></div>
       <div style="text-align:right"><div class="amt ${received?'pos':''}">${fmt(c.amount,c.currency)}</div>
       ${c.currency!=='JOD'?`<div class="sub" style="font-size:11px">≈ ${fmt(fromQAR(toQAR(c.amount,c.currency),'JOD'),'JOD')}</div>`:''}
@@ -1466,16 +1508,20 @@ function openHistory(){
 }
 function showRawMsg(id){
   const x=S.txns.find(t=>t.id===id); if(!x)return; const src=smsSource(x); if(!src)return;
+  const sh=document.getElementById('sheet'); window._listScroll = sh?sh.scrollTop:0;   // remember where we were
   openSheet(`
    <h2>💬 Original message</h2>
    <div class="kv"><span>${esc(displayTitle(x))}</span><span class="amt ${x.dir<0?'neg':'pos'}">${x.dir>0?'+':x.dir<0?'−':''}${fmt(x.amount,x.currency)}</span></div>
    <div class="s" style="margin:2px 0 10px">${esc(x.sub||'')} · ${fmtDate(x.date)}${x.time?' · '+x.time:''}</div>
    <div style="white-space:pre-wrap;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;font-size:14px;line-height:1.55">${esc(src)}</div>
    <button class="btn ghost" onclick="closeRawMsg()">Close</button>
-  `);
+  `, closeRawMsg);
 }
 let _sheetBack=null;   // reopen the list a detail popup was launched from
-function closeRawMsg(){ if(_sheetBack){ const f=_sheetBack; f(); } else closeSheet(); }
+function closeRawMsg(){
+  if(_sheetBack){ const f=_sheetBack; f(); const sh=document.getElementById('sheet'); if(sh) sh.scrollTop=window._listScroll||0; }   // back to the list, same spot
+  else closeSheet();
+}
 function delTxn(id){ const x=S.txns.find(t=>t.id===id); if(!x)return; if(!confirm('Delete this entry? Any money it moved will be put back.'))return; reverseEffects(x.effects); if(x.restorePR){ S.pr.push(x.restorePR); } S.txns=S.txns.filter(t=>t.id!==id); save(); openHistory(); toast('Deleted'); }
 function editTxn(id){
   const x=S.txns.find(t=>t.id===id); if(!x||!x.edit)return toast('This entry can only be deleted');
@@ -1913,6 +1959,7 @@ function expByMonth(){
   return m;
 }
 function openExpMonths(){
+  _expSel=false; _expSelIds=new Set();
   const byM=expByMonth(); const months=Object.keys(byM).sort().reverse();
   const grand=months.reduce((s,mo)=>s+byM[mo].total,0);
   openSheet(`
@@ -1929,12 +1976,31 @@ function openExpMonths(){
 let _expView='newest';   // newest | cat | day | high
 function setExpView(mo,v){ _expView=v; openExpMonth(mo); }
 function expTs(x){ const d=+((x.date||'').replace(/-/g,''))||0; let t=0; const m=(x.time||'').match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i); if(m){ let h=+m[1]; const ap=(m[3]||'').toLowerCase(); if(ap==='pm'&&h<12)h+=12; if(ap==='am'&&h===12)h=0; t=h*60+ +m[2]; } return d*10000+t; }
+let _expSel=false, _expSelIds=new Set();
 function expItemRow(x){
+  if(_expSel){
+    const on=_expSelIds.has(x.id);
+    return `<label class="item" style="cursor:pointer;align-items:center">
+      <input type="checkbox" ${on?'checked':''} onchange="expSelToggle('${x.id}',this.checked)" style="width:20px;height:20px;margin-right:10px;flex:none">
+      <div class="mid" style="min-width:0"><div class="t">${esc(displayTitle(x))}</div>
+      <div class="s">${esc(expenseCat(x))} · ${fmtDate(x.date)}${x.time?' · '+x.time:''}</div></div>
+      <div class="amt neg" style="flex:none">${fmt(x.amount,x.currency)}</div></label>`;
+  }
   return `<div class="item"><div class="em">${x.emoji||'🧾'}</div>
     <div class="mid${smsSource(x)?' tap':''}" ${smsSource(x)?`onclick="showRawMsg('${x.id}')"`:''}><div class="t">${esc(displayTitle(x))}${smsSource(x)?' <span class="dim" style="font-size:12px">💬</span>':''}</div>
     <div class="s">${x.edit&&x.edit.account?accName(x.edit.account)+' · ':''}${fmtDate(x.date)}${x.time?' · '+x.time:''}</div></div>
     <div style="text-align:right"><div class="amt neg">${fmt(x.amount,x.currency)}</div>
     <button class="del" style="color:var(--accent)" onclick="editTxn('${x.id}')">Edit</button></div></div>`;
+}
+function expSelToggle(id,on){ if(on)_expSelIds.add(id); else _expSelIds.delete(id); const h=document.getElementById('expSelHint'); if(h)h.textContent=_expSelIds.size+' selected'; }
+function expSelMode(mo){ _expSel=!_expSel; _expSelIds=new Set(); openExpMonth(mo); }
+function expBulkApply(mo){
+  if(!_expSelIds.size)return toast('Select some entries first');
+  const cat=document.getElementById('expBulkCat').value;
+  let n=0;
+  S.txns.forEach(x=>{ if(_expSelIds.has(x.id)){ x.cat=cat; x.catEdited=true; n++;
+    const k=merchantKey(x); if(k){ S.settings.catMemory=S.settings.catMemory||{}; S.settings.catMemory[k]=cat; } } });   // apply + learn the merchant
+  _expSel=false; _expSelIds=new Set(); save(); openExpMonth(mo); toast(n+' moved to '+cat);
 }
 function openExpMonth(mo){
   _sheetBack=()=>openExpMonth(mo);
@@ -1969,6 +2035,8 @@ function openExpMonth(mo){
    <button class="btn" style="margin-top:8px" onclick="saveMonthOverride('expOverride','${mo}','expOv',openExpMonth)">Save total</button>
    <label class="f" style="margin-top:12px">View</label>
    <div class="seg">${seg('newest','Newest')}${seg('cat','Category')}${seg('day','By day')}${seg('high','Highest')}</div>
+   <button class="btn ghost" style="margin-top:8px" onclick="expSelMode('${mo}')">${_expSel?'✕ Cancel selection':'☑︎ Select entries to bulk-edit category'}</button>
+   ${_expSel?`<div class="row" style="gap:8px;align-items:center;margin-top:6px"><select id="expBulkCat" style="flex:1">${catOptions('')}</select><button class="btn" style="width:auto;padding:0 18px" onclick="expBulkApply('${mo}')">Apply</button></div><p class="hint" id="expSelHint">${_expSelIds.size} selected — tick entries, pick a category, then Apply.</p>`:''}
    ${body}
    <button class="btn ghost" style="margin-top:10px" onclick="openExpMonths()">← All months</button>
   `);
