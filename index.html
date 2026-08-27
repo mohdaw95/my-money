@@ -267,7 +267,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-08-05-diff-buyprice';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-08-05-show3-exit';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -294,6 +294,22 @@ function monthBalanceDiff(mo){
   return {opening,closing,diff:closing-opening};
 }
 function save(){ S.updatedAt=Date.now(); recordDailyBalance(); localStorage.setItem(LS, JSON.stringify(S)); render(); cloudPushSoon(); }
+/* home "Difference" card → change in total account balances, month by month */
+function openDiffMonths(){
+  _sheetBack=openDiffMonths;
+  const bd=S.settings.balByDay||{};
+  const months=[...new Set(Object.keys(bd).map(d=>d.slice(0,7)))].sort().reverse();
+  const rows=months.map(mo=>({mo,b:monthBalanceDiff(mo)})).filter(r=>r.b);
+  openSheet(`
+   <h2>📉 Account difference by month</h2>
+   <p class="hint" style="margin-top:0">Change in your total account balances from the first day to the last day of each month.</p>
+   <div class="list">${rows.length?rows.map(r=>`
+     <div class="item"><div class="em">📅</div>
+       <div class="mid"><div class="t">${monthLabel(r.mo)}${r.mo===curMonth()?' <span class="badge paid">this month</span>':''}</div>
+       <div class="s">${fmt(r.b.opening,'QAR')} → ${fmt(r.b.closing,'QAR')}</div></div>
+       <div class="amt ${r.b.diff>=0?'pos':'neg'}" style="flex:none">${r.b.diff>=0?'+':'−'}${fmt(Math.abs(r.b.diff),'QAR')}</div></div>`).join(''):'<div class="empty">Not enough history yet — it builds day by day.</div>'}</div>
+  `);
+}
 let _pushT=null;
 function cloudPushSoon(){ if(!S.settings.cloudUrl)return; clearTimeout(_pushT); _pushT=setTimeout(()=>cloudPush(),1500); }
 function uid(){ return 'i'+Math.random().toString(36).slice(2,9); }
@@ -329,11 +345,8 @@ function render(){
   const t=totals();
   document.getElementById('netWorth').innerHTML = 'QAR '+Math.round(t.net).toLocaleString('en');
 
-  // backup reminder: show if there's real data and it's been >7 days (or never) since last backup
-  const hasData = S.txns.length||S.cars.length||S.pr.length||S.gold.length||ACCTS.some(a=>S.accounts[a.key]);
-  const lb=S.settings.lastBackup, days=lb?(Date.now()-lb)/86400000:Infinity;
-  document.getElementById('backupBanner').innerHTML = (hasData && days>7)
-    ? `<div class="bkbanner"><span>⚠️ ${lb?'Last backup '+timeAgo(lb)+'.':'You have no backup yet.'} Keep your data safe.</span><button onclick="openBackup()">Back up</button></div>` : '';
+  // backup reminder banner removed (cloud auto-backs up daily); keep the element empty
+  document.getElementById('backupBanner').innerHTML = '';
 
   document.getElementById('heroStats').innerHTML =
     `<div class="st"><div class="k">TOTAL ASSETS</div><div class="v a">${fmt(t.assets,'QAR')}</div></div>`+
@@ -381,6 +394,12 @@ function render(){
       <div class="bal" style="color:var(--red)">${fmt(cmExp,'QAR')}</div>
       <div class="sub">${monthLabel(curMonth())}</div>
     </div>
+    <div class="acard tap" onclick="openDiffMonths()">
+      <div class="ic">📉</div><div class="nm">Difference</div>
+      ${(()=>{ const b=monthBalanceDiff(curMonth()); return b
+        ? `<div class="bal" style="color:${b.diff>=0?'var(--green)':'var(--red)'}">${b.diff>=0?'+':'−'}${fmt(Math.abs(b.diff),'QAR')}</div><div class="sub">${monthLabel(curMonth())} · accounts</div>`
+        : `<div class="bal" style="color:var(--muted)">—</div><div class="sub">building history…</div>`; })()}
+    </div>
     <div class="acard tap" onclick="openSavings()">
       <div class="ic">🐖</div><div class="nm">Savings this month</div>
       <div class="bal" style="color:${cmSavings>=0?'var(--green)':'var(--red)'}">${fmt(cmSavings,'QAR')}</div>
@@ -392,7 +411,7 @@ function render(){
     const ap=a.status==='receivable'?0:1, bp=b.status==='receivable'?0:1;
     return ap!==bp ? ap-bp : (b.date||'').localeCompare(a.date||'');
   });
-  document.getElementById('carsList').innerHTML = cars.length? cars.map(c=>`
+  document.getElementById('carsList').innerHTML = cars.length? (cars.slice(0,3).map(c=>`
     <div class="item">
       <div class="em">🚗</div>
       <div class="mid">
@@ -405,7 +424,7 @@ function render(){
         ${c.status==='receivable'?`<button class="del" style="color:var(--green)" onclick="markPaid('${c.id}')">Mark paid →</button>`:`<span class="badge paid">PAID</span>`}
         <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editCar('${c.id}')">Edit</button><button class="del" onclick="delCar('${c.id}')">Delete</button></div>
       </div>
-    </div>`).join('') : `<div class="empty">No cars yet. Add one or log a car revenue.</div>`;
+    </div>`).join('') + (cars.length>3?`<button class="btn ghost" onclick="openCars()">Show all ${cars.length} cars ›</button>`:'')) : `<div class="empty">No cars yet. Add one or log a car revenue.</div>`;
   const hasRecv = S.cars.some(c=>c.status==='receivable');
   document.getElementById('waBtn').style.display = hasRecv?'block':'none';
   document.getElementById('bulkRecvBtn').style.display = hasRecv?'block':'none';
@@ -424,17 +443,8 @@ function render(){
     <div class="prcard tap" onclick="openKashf('payable')"><div class="k">📤 I owe</div><div class="v neg">${fmt(t.payables,'QAR')}</div><div class="more">kashf ›</div></div>
     <div class="prcard"><div class="k">Net (owed − owe)</div><div class="v ${t.prNet>=0?'pos':'neg'}">${t.prNet>=0?'+':'−'}${fmt(Math.abs(t.prNet),'QAR')}</div></div>`;
 
-  document.getElementById('prList').innerHTML = S.pr.length? S.pr.map(p=>`
-    <div class="item">
-      <div class="em">${p.type==='receivable'?'📥':'📤'}</div>
-      <div class="mid"><div class="t">${esc(p.name||'—')}</div>
-      <div class="s">${p.type==='receivable'?'Owed to me':'I owe'} · ${esc(p.detail||'')} · ${fmtDate(p.date)}</div></div>
-      <div style="text-align:right">
-        <div class="amt ${p.type==='receivable'?'pos':'neg'}">${p.type==='receivable'?'+':'−'}${fmt(p.amount,p.currency)}</div>
-        <button class="del" style="color:var(--green)" onclick="settlePR('${p.id}')">Settle →</button>
-        <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editPR('${p.id}')">Edit</button><button class="del" onclick="delPR('${p.id}')">Delete</button></div>
-      </div>
-    </div>`).join('') : `<div class="empty">Nothing owed either way.</div>`;
+  const prSorted=[...S.pr].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  document.getElementById('prList').innerHTML = S.pr.length? (prSorted.slice(0,3).map(prRow).join('') + (S.pr.length>3?`<button class="btn ghost" onclick="openAllPR()">Show all ${S.pr.length} ›</button>`:'')) : `<div class="empty">Nothing owed either way.</div>`;
 
   // history
   const recent=[...S.txns].reverse().slice(0,6);
@@ -667,6 +677,23 @@ function openPR(preset){
    <button class="btn" onclick="savePR()">Save</button>
    <p class="hint">This tracks debts only. When settled you'll be asked which account the money moves to/from.</p>
   `);
+}
+/* one Owe/Owed row (shared by the home list and the full list) */
+function prRow(p){
+  return `<div class="item">
+    <div class="em">${p.type==='receivable'?'📥':'📤'}</div>
+    <div class="mid" style="min-width:0"><div class="t">${esc(p.name||'—')}</div>
+    <div class="s">${p.type==='receivable'?'Owed to me':'I owe'} · ${p.detail?esc(p.detail)+' · ':''}${fmtDate(p.date)}</div></div>
+    <div style="text-align:right">
+      <div class="amt ${p.type==='receivable'?'pos':'neg'}">${p.type==='receivable'?'+':'−'}${fmt(p.amount,p.currency)}</div>
+      <button class="del" style="color:var(--green)" onclick="settlePR('${p.id}')">Settle →</button>
+      <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editPR('${p.id}')">Edit</button><button class="del" onclick="delPR('${p.id}')">Delete</button></div>
+    </div></div>`;
+}
+function openAllPR(){
+  _sheetBack=openAllPR;
+  const list=[...S.pr].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  openSheet(`<h2>📥 Owe / Owed — all (${list.length})</h2><div class="list">${list.length?list.map(prRow).join(''):'<div class="empty">Nothing owed either way.</div>'}</div>`);
 }
 /* Kashf (statement) — a full list of just receivables OR just payables, with a total */
 function openKashf(type){
@@ -2166,17 +2193,27 @@ function editUrgentExit(){
    <h2>✎ Urgent exit values</h2>
    <label class="f">End-of-service basic (per year — divided by 12/month)</label><input id="ueBasic" type="text" inputmode="decimal" value="${+S.settings.exitBasic||0}">
    <label class="f">Company start date</label><input type="date" id="ueStart" value="${S.settings.exitStart||'2022-11-01'}">
-   ${items.map((i,idx)=>`<label class="f">${esc(i.name)} (QAR)</label><input id="ueItem${idx}" type="text" inputmode="decimal" value="${+i.value||0}">`).join('')}
+   <label class="f" style="margin-top:10px">Assets (name &amp; price)</label>
+   ${items.map((i,idx)=>`<div class="row" style="gap:8px;margin-bottom:8px;align-items:center">
+     <input id="ueName${idx}" value="${esc(i.name||'')}" placeholder="Name" style="flex:1;min-width:0">
+     <input id="ueItem${idx}" type="text" inputmode="decimal" value="${+i.value||0}" placeholder="QAR" style="width:104px;flex:none">
+     <button class="del" onclick="delExitItem(${idx})" style="color:var(--red);flex:none">✕</button>
+   </div>`).join('')}
+   <button class="btn ghost" onclick="addExitItem()">＋ Add item</button>
    <button class="btn" onclick="saveUrgentExit()">Save</button>
    <button class="btn ghost" onclick="openUrgentExit()">← Back</button>
   `);
 }
-function saveUrgentExit(){
-  const b=num(document.getElementById('ueBasic').value); if(!isNaN(b))S.settings.exitBasic=b;
-  const st=document.getElementById('ueStart').value; if(st)S.settings.exitStart=st;
-  (S.settings.exitItems||[]).forEach((i,idx)=>{ const el=document.getElementById('ueItem'+idx); if(el){ const v=num(el.value); if(!isNaN(v))i.value=v; } });
-  save(); openUrgentExit(); toast('Saved');
+function readExitInputs(){
+  S.settings.exitItems=S.settings.exitItems||[];
+  S.settings.exitItems.forEach((i,idx)=>{ const n=document.getElementById('ueName'+idx), v=document.getElementById('ueItem'+idx);
+    if(n) i.name=n.value.trim()||i.name; if(v){ const nv=num(v.value); if(!isNaN(nv)) i.value=nv; } });
+  const b=document.getElementById('ueBasic'); if(b){ const bv=num(b.value); if(!isNaN(bv)) S.settings.exitBasic=bv; }
+  const st=document.getElementById('ueStart'); if(st&&st.value) S.settings.exitStart=st.value;
 }
+function addExitItem(){ readExitInputs(); S.settings.exitItems.push({name:'New item',value:0}); editUrgentExit(); }
+function delExitItem(idx){ readExitInputs(); S.settings.exitItems.splice(idx,1); editUrgentExit(); }
+function saveUrgentExit(){ readExitInputs(); save(); openUrgentExit(); toast('Saved'); }
 
 /* re-title old bank-SMS entries with the improved merchant extractor (runs once) */
 function retitleOldSms(){
