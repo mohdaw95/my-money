@@ -267,7 +267,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-08-05-show3-exit';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-08-05-car2inspect';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -980,23 +980,55 @@ function editCar(id){
   const c=S.cars.find(x=>x.id===id); if(!c)return; window._carC=c.country; window._carDeal=c.deal||'done';
   openSheet(`
    <h2>✎ Edit car</h2>
-   <label class="f">Country</label>
-   <div class="seg"><button id="cq-Qatar" class="${c.country==='Qatar'?'on':''}" onclick="carC('Qatar')">🇶🇦 Qatar</button><button id="cq-UAE" class="${c.country==='UAE'?'on':''}" onclick="carC('UAE')">🇦🇪 UAE</button></div>
-   <label class="f">Title</label><input id="carDet" value="${esc(c.detail||'')}">
-   <label class="f">Seller</label>
-   <select id="carSeller"><option value="">— No seller —</option>${(S.sellers||[]).map(s=>`<option value="${s.id}" ${c.sellerId===s.id?'selected':''}>${esc(s.name)}${s.country?' ('+s.country+')':''}</option>`).join('')}</select>
-   <label class="f">Deal status</label>
-   <div class="seg" id="carDealSeg">${['negotiation','done','lost'].map(d=>`<button type="button" data-deal="${d}" class="${(c.deal||'done')===d?'on':''}" onclick="carDealPick('${d}')">${d==='negotiation'?'🟡 Negotiation':d==='done'?'🟢 Done':'🔴 Lost'}</button>`).join('')}</div>
-   ${carFormFields(c)}
-   <label class="f">Date</label><input type="date" id="carDate" value="${c.date}">
-   ${c.status==='paid'?`<label class="f">Paid into account</label><select id="carAcc">${accountOptions(c.account)}</select>`:''}
-   <button class="btn" onclick="saveEditCar('${id}')">Save changes</button>
+   <label class="f">Type</label>
+   <div class="seg">
+     <button type="button" id="cq-Qatar" class="${c.country==='Qatar'?'on':''}" onclick="carCEdit('Qatar')">🇶🇦 Qatar</button>
+     <button type="button" id="cq-UAE" class="${c.country==='UAE'?'on':''}" onclick="carCEdit('UAE')">🇦🇪 UAE</button>
+     <button type="button" id="cq-Inspection" onclick="carCEdit('Inspection')">🔍 Inspection</button>
+   </div>
+   <div id="carInspFields" class="hide">
+     <label class="f">Inspection amount (QAR)</label><input id="inspAmt" type="text" inputmode="decimal" value="${(c.inspection&&+c.inspection)||100}">
+     <p class="hint">Converts this car into an <b>“I owe”</b> payable with this amount, and removes it from cars &amp; pending. Nothing else changes.</p>
+   </div>
+   <div id="carNormalFields">
+     <label class="f">Title</label><input id="carDet" value="${esc(c.detail||'')}">
+     <label class="f">Seller</label>
+     <select id="carSeller"><option value="">— No seller —</option>${(S.sellers||[]).map(s=>`<option value="${s.id}" ${c.sellerId===s.id?'selected':''}>${esc(s.name)}${s.country?' ('+s.country+')':''}</option>`).join('')}</select>
+     <label class="f">Deal status</label>
+     <div class="seg" id="carDealSeg">${['negotiation','done','lost'].map(d=>`<button type="button" data-deal="${d}" class="${(c.deal||'done')===d?'on':''}" onclick="carDealPick('${d}')">${d==='negotiation'?'🟡 Negotiation':d==='done'?'🟢 Done':'🔴 Lost'}</button>`).join('')}</div>
+     ${carFormFields(c)}
+     <label class="f">Date</label><input type="date" id="carDate" value="${c.date}">
+     ${c.status==='paid'?`<label class="f">Paid into account</label><select id="carAcc">${accountOptions(c.account)}</select>`:''}
+   </div>
+   <button class="btn" id="carSaveBtn" onclick="saveEditCar('${id}')">Save changes</button>
    <button class="btn red" onclick="delCar('${id}')">Delete</button>
   `);
   carRecvPreview();
 }
+function carCEdit(country){
+  window._carC=country;
+  const insp=country==='Inspection';
+  document.getElementById('cq-Qatar').classList.toggle('on',country==='Qatar');
+  document.getElementById('cq-UAE').classList.toggle('on',country==='UAE');
+  document.getElementById('cq-Inspection').classList.toggle('on',insp);
+  document.getElementById('carNormalFields').classList.toggle('hide',insp);
+  document.getElementById('carInspFields').classList.toggle('hide',!insp);
+  const btn=document.getElementById('carSaveBtn'); if(btn) btn.textContent=insp?'Convert to inspection (I owe)':'Save changes';
+  if(insp) return;
+  carC(country);   // Qatar/UAE: show Qatar-only fields + fill empty defaults (non-destructive)
+}
 function saveEditCar(id){
   const c=S.cars.find(x=>x.id===id); if(!c)return;
+  if(window._carC==='Inspection'){        // convert this car into an "I owe" payable
+    const amt=num((document.getElementById('inspAmt')||{}).value)||0;
+    if(amt<=0)return toast('Enter the inspection amount');
+    if(c.status==='paid'&&c.effect) reverseEffects([c.effect]);   // undo any account deposit it made
+    carTxnRemove(c.id);                                            // remove its activity note
+    S.pr=S.pr||[]; S.pr.push({id:uid(),type:'payable',name:c.detail||'Inspection',amount:amt,currency:'QAR',detail:'Inspection',date:c.date});
+    S.cars=S.cars.filter(x=>x.id!==id);                            // no longer counted as a car / pending
+    save(); closeSheet(); render(); toast('Converted to inspection · I owe '+fmt(amt,'QAR'));
+    return;
+  }
   const country=window._carC||'Qatar';
   const comm=num(document.getElementById('carComm').value)||0, trans=num(document.getElementById('carTrans').value)||0;
   const dep=country==='Qatar'?(num(document.getElementById('carDep').value)||0):0;   // UAE has no deposit/inspection
