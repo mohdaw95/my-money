@@ -268,7 +268,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-08-06-bulk-insp';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-08-06-insp-in-recv';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -330,7 +330,7 @@ function totals(){
   ACCTS.forEach(a=>{ const q=toQAR(S.accounts[a.key]||0,a.cur); accQAR[a.key]=q; accTotal+=q; });
   const grams=S.gold.reduce((s,g)=>s+g.grams,0);
   const goldQAR=goldValueQAR(grams);
-  const carsRecvQAR=S.cars.filter(c=>c.status==='receivable').reduce((s,c)=>s+toQAR(c.amount,c.currency),0);
+  const carsRecvQAR=S.cars.filter(c=>c.status==='receivable'||c.status==='inspection').reduce((s,c)=>s+toQAR(c.amount,c.currency),0);   // include inspection cars in the receivable total
   const receivables=S.pr.filter(p=>p.type==='receivable').reduce((s,p)=>s+toQAR(p.amount,p.currency),0);
   const payables=S.pr.filter(p=>p.type==='payable').reduce((s,p)=>s+toQAR(p.amount,p.currency),0);
   const prNet=receivables-payables;
