@@ -224,7 +224,7 @@ function carRev(c){ if(c.rev!=null && c.rev!=='') return +c.rev||0; if(c.commiss
 function carRevByMonth(){
   const m={};
   const slot=mo=>{ if(!m[mo])m[mo]={total:0,count:0,cars:[],entries:[]}; return m[mo]; };
-  S.cars.forEach(c=>{ const s=slot((c.date||today()).slice(0,7)); s.total+=carRev(c); s.count++; s.cars.push(c); });
+  S.cars.filter(c=>c.status!=='inspection').forEach(c=>{ const s=slot((c.date||today()).slice(0,7)); s.total+=carRev(c); s.count++; s.cars.push(c); });
   (S.carRevEntries||[]).forEach(e=>{ const s=slot((e.date||today()).slice(0,7)); const rev=(+e.count||0)*carRate(e.country); s.total+=rev; s.count+=(+e.count||0); s.entries.push(e); });
   const ov=S.settings.carRevOverride||{};   // manual month total overrides the computed one
   Object.keys(ov).forEach(mo=>{ if(ov[mo]!=null&&ov[mo]!==''){ slot(mo).total=+ov[mo]||0; m[mo].override=true; } });
@@ -267,7 +267,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-08-05-btntext';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-08-06-insp-owe';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -382,7 +382,7 @@ function render(){
     <div class="acard tap" onclick="openCars()">
       <div class="ic">🚗</div><div class="nm">Cars receivable</div>
       <div class="bal" style="color:var(--green)">${fmt(t.carsRecvQAR,'QAR')}</div>
-      <div class="sub">≈ ${fmt(fromQAR(t.carsRecvQAR,'JOD'),'JOD')} · ${S.cars.filter(c=>c.status==='receivable').length} pending${(()=>{const n=(S.pr||[]).filter(p=>p.type==='payable'&&p.detail==='Inspection').length;return n?' · '+n+' inspection'+(n>1?'s':''):'';})()}</div>
+      <div class="sub">≈ ${fmt(fromQAR(t.carsRecvQAR,'JOD'),'JOD')} · ${S.cars.filter(c=>c.status==='receivable').length} pending${(()=>{const n=(S.pr||[]).filter(p=>p.type==='payable'&&p.detail==='Inspection').length+S.cars.filter(c=>c.status==='inspection').length;return n?' · '+n+' inspection'+(n>1?'s':''):'';})()}</div>
     </div>
     <div class="acard tap" onclick="openCarRev()">
       <div class="ic">📤</div><div class="nm">Rev from cars</div>
@@ -416,7 +416,7 @@ function render(){
       <div class="em">🚗</div>
       <div class="mid">
         ${carTitleHtml(c)}
-        <div class="s">${c.status==='receivable'?'Receivable':(c.account?'Received → '+accName(c.account):'Received')} · ${fmtDate(c.date)}</div>
+        <div class="s">${c.status==='inspection'?'🔍 Inspection':(c.status==='receivable'?'Receivable':(c.account?'Received → '+accName(c.account):'Received'))} · ${fmtDate(c.date)}</div>
       </div>
       <div style="text-align:right">
         <div class="amt ${c.status==='paid'?'pos':''}">${fmt(c.amount,c.currency)}</div>
@@ -910,7 +910,9 @@ function saveCar(){
   const c={id:uid(),amount,currency:'QAR',country,status:'receivable',detail:det,date,commission:comm,deposit:dep,inspection:insp,transfer:trans,deal,buyPrice:buy};
   if(sellerId) c.sellerId=sellerId;
   S.cars.push(c); carTxnSync(c);
-  save(); closeSheet(); toast('Car added · receivable '+fmt(amount,'QAR'));
+  // a new car's inspection fee is money you owe → auto-add to "I owe" (only on ADD, never on edit)
+  if(insp>0){ S.pr=S.pr||[]; S.pr.push({id:uid(),type:'payable',name:(det||'Car')+' — inspection',amount:insp,currency:'QAR',detail:'Inspection',date}); }
+  save(); closeSheet(); toast('Car added · receivable '+fmt(amount,'QAR')+(insp>0?' · inspection '+fmt(insp,'QAR')+' to I owe':''));
 }
 function markPaid(id){
   const c=S.cars.find(x=>x.id===id); if(!c)return;
@@ -1019,14 +1021,13 @@ function carCEdit(country){
 }
 function saveEditCar(id){
   const c=S.cars.find(x=>x.id===id); if(!c)return;
-  if(window._carC==='Inspection'){        // convert this car into an "I owe" payable
+  if(window._carC==='Inspection'){        // reclassify this car as inspection-only (NOT a receivable, NOT an "I owe")
     const amt=num((document.getElementById('inspAmt')||{}).value)||0;
     if(amt<=0)return toast('Enter the inspection amount');
-    if(c.status==='paid'&&c.effect) reverseEffects([c.effect]);   // undo any account deposit it made
-    carTxnRemove(c.id);                                            // remove its activity note
-    S.pr=S.pr||[]; S.pr.push({id:uid(),type:'payable',name:c.detail||'Inspection',amount:amt,currency:'QAR',detail:'Inspection',date:c.date});
-    S.cars=S.cars.filter(x=>x.id!==id);                            // no longer counted as a car / pending
-    save(); closeSheet(); render(); toast('Converted to inspection · I owe '+fmt(amt,'QAR'));
+    if(c.status==='paid'&&c.effect){ reverseEffects([c.effect]); delete c.effect; delete c.account; }   // undo any account deposit
+    c.status='inspection'; c.amount=amt; c.currency='QAR'; c.inspection=amt;   // just an inspection record — no payable, owe unchanged
+    carTxnRemove(c.id);                                            // remove its receivable activity note
+    save(); closeSheet(); render(); toast('Marked as inspection · '+fmt(amt,'QAR'));
     return;
   }
   const country=window._carC||'Qatar';
@@ -1142,7 +1143,7 @@ function carTitleHtml(c){
 function carRow(c,received){
   return `<div class="item"><div class="em">🚗</div><div class="mid" style="min-width:0">
       ${carTitleHtml(c)}
-      <div class="s">${received?(c.account?'✓ Received → '+accName(c.account):'✓ Received'):'Receivable'} · ${fmtDate(c.date)}${c.buyPrice?' · buy '+fmt(c.buyPrice,'QAR'):''}</div></div>
+      <div class="s">${c.status==='inspection'?'🔍 Inspection':(received?(c.account?'✓ Received → '+accName(c.account):'✓ Received'):'Receivable')} · ${fmtDate(c.date)}${c.buyPrice?' · buy '+fmt(c.buyPrice,'QAR'):''}</div></div>
       <div style="text-align:right"><div class="amt ${received?'pos':''}">${fmt(c.amount,c.currency)}</div>
       ${c.currency!=='JOD'?`<div class="sub" style="font-size:11px">≈ ${fmt(fromQAR(toQAR(c.amount,c.currency),'JOD'),'JOD')}</div>`:''}
       ${!received?`<button class="del" style="color:var(--green)" onclick="markPaid('${c.id}')">Mark paid →</button>`:''}
@@ -1152,9 +1153,11 @@ function carRow(c,received){
 function openCars(){
   const bydate=(a,b)=>(b.date||'').localeCompare(a.date||'');
   const pending=S.cars.filter(c=>c.status==='receivable').slice().sort(bydate);
-  const paid=S.cars.filter(c=>c.status!=='receivable');
+  const inspections=S.cars.filter(c=>c.status==='inspection').slice().sort(bydate);
+  const paid=S.cars.filter(c=>c.status!=='receivable'&&c.status!=='inspection');
   const pendTot=pending.reduce((s,c)=>s+toQAR(c.amount,c.currency),0);
   const paidTot=paid.reduce((s,c)=>s+toQAR(c.amount,c.currency),0);
+  const inspTot=inspections.reduce((s,c)=>s+toQAR(c.amount,c.currency),0);
   // group received (history) by month, newest month first
   const byMonth={}; paid.forEach(c=>{ const mo=(c.date||today()).slice(0,7); (byMonth[mo]=byMonth[mo]||[]).push(c); });
   const months=Object.keys(byMonth).sort().reverse();
@@ -1162,6 +1165,9 @@ function openCars(){
    <h2>🚗 Cars</h2>
    <div class="kv"><span style="font-weight:800;color:var(--green)">📥 Receivable · ${pending.length} pending</span><span style="font-weight:800;color:var(--green)">${fmt(pendTot,'QAR')}</span></div>
    <div class="list" style="margin-top:6px">${pending.length?pending.map(c=>carRow(c,false)).join(''):'<div class="empty">Nothing pending — all received 🎉</div>'}</div>
+   ${inspections.length?`
+   <div class="kv" style="margin-top:16px"><span style="font-weight:800">🔍 Inspection only · ${inspections.length}</span><span style="font-weight:800">${fmt(inspTot,'QAR')}</span></div>
+   <div class="list" style="margin-top:6px;opacity:.82">${inspections.map(c=>carRow(c,true)).join('')}</div>`:''}
    ${paid.length?`
    <div class="kv" style="margin-top:16px"><span style="font-weight:800">✓ Received · history</span><span style="font-weight:800;color:var(--green)">${fmt(paidTot,'QAR')}</span></div>
    ${months.map(mo=>{ const cs=byMonth[mo].slice().sort(bydate); const mt=cs.reduce((s,c)=>s+toQAR(c.amount,c.currency),0);
