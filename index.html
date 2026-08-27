@@ -267,7 +267,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-08-05-car2inspect';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-08-05-inspcount';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -382,7 +382,7 @@ function render(){
     <div class="acard tap" onclick="openCars()">
       <div class="ic">🚗</div><div class="nm">Cars receivable</div>
       <div class="bal" style="color:var(--green)">${fmt(t.carsRecvQAR,'QAR')}</div>
-      <div class="sub">≈ ${fmt(fromQAR(t.carsRecvQAR,'JOD'),'JOD')} · ${S.cars.filter(c=>c.status==='receivable').length} pending</div>
+      <div class="sub">≈ ${fmt(fromQAR(t.carsRecvQAR,'JOD'),'JOD')} · ${S.cars.filter(c=>c.status==='receivable').length} pending${(()=>{const n=(S.pr||[]).filter(p=>p.type==='payable'&&p.detail==='Inspection').length;return n?' · '+n+' inspection'+(n>1?'s':''):'';})()}</div>
     </div>
     <div class="acard tap" onclick="openCarRev()">
       <div class="ic">📤</div><div class="nm">Rev from cars</div>
