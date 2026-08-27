@@ -267,7 +267,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-08-05-inspcount';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-08-05-btntext';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -1013,7 +1013,7 @@ function carCEdit(country){
   document.getElementById('cq-Inspection').classList.toggle('on',insp);
   document.getElementById('carNormalFields').classList.toggle('hide',insp);
   document.getElementById('carInspFields').classList.toggle('hide',!insp);
-  const btn=document.getElementById('carSaveBtn'); if(btn) btn.textContent=insp?'Convert to inspection (I owe)':'Save changes';
+  const btn=document.getElementById('carSaveBtn'); if(btn) btn.textContent=insp?'Convert to inspection':'Save changes';
   if(insp) return;
   carC(country);   // Qatar/UAE: show Qatar-only fields + fill empty defaults (non-destructive)
 }
