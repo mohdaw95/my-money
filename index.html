@@ -169,6 +169,7 @@
   <div class="sec"><h3>🚗 Cars</h3><a onclick="openCarAdd()">+ Add car</a></div>
   <div class="list" id="carsList"></div>
   <button class="btn ghost" id="bulkRecvBtn" style="display:none" onclick="openBulkReceive()">✓ Receive multiple cars at once</button>
+  <button class="btn ghost" id="bulkInspBtn" style="display:none" onclick="openBulkInspect()">🔍 Convert multiple to inspection</button>
   <button class="btn" id="waBtn" style="background:#25D366;color:#062e16;display:none" onclick="shareCarsWhatsApp()">🟢 Send cars summary on WhatsApp</button>
 
   <!-- EXPENSES BY CATEGORY -->
@@ -267,7 +268,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-08-06-insp-owe';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-08-06-bulk-insp';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -428,6 +429,7 @@ function render(){
   const hasRecv = S.cars.some(c=>c.status==='receivable');
   document.getElementById('waBtn').style.display = hasRecv?'block':'none';
   document.getElementById('bulkRecvBtn').style.display = hasRecv?'block':'none';
+  document.getElementById('bulkInspBtn').style.display = hasRecv?'block':'none';
 
   // expenses summary — top categories
   const exps=S.txns.filter(x=>x.dir<0);
@@ -977,6 +979,35 @@ function doBulkReceive(){
     c.status='paid'; carTxnSync(c); n++;
   });
   save(); closeSheet(); toast(acc?(n+' cars received into '+accName(acc)):(n+' cars marked received'));
+}
+/* bulk: pick receivable cars and reclassify them all as inspection-only (no "I owe" change) */
+function openBulkInspect(){
+  const recv=S.cars.filter(c=>c.status==='receivable');
+  if(!recv.length)return toast('No receivable cars');
+  const rows=recv.map(c=>`
+    <label class="item" style="cursor:pointer;align-items:center">
+      <input type="checkbox" class="binChk" value="${c.id}" checked style="width:20px;height:20px;margin-right:10px;flex:none">
+      <div class="mid" style="min-width:0">${carTitleHtml(c)}<div class="s">${fmtDate(c.date)} · ${fmt(c.amount,c.currency)}</div></div>
+    </label>`).join('');
+  openSheet(`
+   <h2>🔍 Convert cars to inspection</h2>
+   <p class="hint" style="margin-top:0">Selected cars become <b>inspection-only</b> — removed from receivable &amp; pending. Does <b>not</b> change your “I owe”.</p>
+   <label style="cursor:pointer;display:block;margin-bottom:6px"><input type="checkbox" id="binAll" checked onchange="document.querySelectorAll('.binChk').forEach(c=>c.checked=this.checked)" style="width:18px;height:18px;margin-right:8px;vertical-align:middle">Select all (${recv.length})</label>
+   <div class="list" style="max-height:52vh;overflow:auto">${rows}</div>
+   <button class="btn" onclick="doBulkInspect()">🔍 Convert selected to inspection</button>
+  `);
+}
+function doBulkInspect(){
+  const ids=[...document.querySelectorAll('.binChk')].filter(c=>c.checked).map(c=>c.value);
+  if(!ids.length)return toast('Select at least one car');
+  let n=0;
+  ids.forEach(id=>{ const c=S.cars.find(x=>x.id===id); if(!c||c.status!=='receivable')return;
+    if(c.effect){ reverseEffects([c.effect]); delete c.effect; delete c.account; }
+    const amt=(c.inspection&&+c.inspection)||100;
+    c.status='inspection'; c.amount=amt; c.currency='QAR'; c.inspection=amt;
+    carTxnRemove(c.id); n++;
+  });
+  save(); closeSheet(); toast(n+' car'+(n>1?'s':'')+' → inspection');
 }
 function editCar(id){
   const c=S.cars.find(x=>x.id===id); if(!c)return; window._carC=c.country; window._carDeal=c.deal||'done';
