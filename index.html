@@ -269,7 +269,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-08-06-bulk-settle';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-08-06-settle-noexp';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -782,7 +782,8 @@ function doBulkSettle(){
   let n=0;
   ids.forEach(id=>{ const p=S.pr.find(x=>x.id===id); if(!p||p.type!=='payable')return;
     const eff = acc ? withdraw(acc,p.amount,p.currency) : null;
-    log('📤',(p.name||'')+' settled','Settled'+(acc?' from '+accName(acc):' (marked paid)'),p.amount,p.currency,-1,today(),eff?[eff]:null);
+    const dir = acc ? -1 : 0;   // no account chosen → just a record, NOT counted as an expense
+    log('📤',(p.name||'')+' settled','Settled'+(acc?' from '+accName(acc):' (marked paid, no money moved)'),p.amount,p.currency,dir,today(),eff?[eff]:null);
     S.txns[S.txns.length-1].restorePR=clone(p);   // undo brings the debt back
     n++;
   });
