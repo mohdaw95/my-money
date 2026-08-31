@@ -269,7 +269,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-08-06-settle-noexp';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-08-06-partial-recv';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -957,22 +957,35 @@ function saveCar(){
 function markPaid(id){
   const c=S.cars.find(x=>x.id===id); if(!c)return;
   openSheet(`
-   <h2>✓ Mark car as received</h2>
-   <div class="kv"><span>${esc(c.detail||'Car')} · ${c.country}</span><span>${fmt(c.amount,c.currency)}</span></div>
+   <h2>✓ Receive from car</h2>
+   <div class="kv"><span>${esc(c.detail||'Car')} · ${c.country}</span><span>${fmt(c.amount,c.currency)} receivable</span></div>
+   <label class="f">Amount received now (QAR)</label>
+   <input id="mpAmt" type="text" inputmode="decimal" value="${c.amount}">
+   <p class="hint">Enter the full amount to close it, or <b>less for a partial</b> — the remainder stays receivable.</p>
    <label class="f">Add the money to an account? (optional)</label>
-   <select id="mpAcc"><option value="">— No, just mark received —</option>${accountOptions('')}</select>
-   <p class="hint">Leave as "just mark received" if your balances already update from bank SMS. Pick an account only if you want to add this amount to a balance.</p>
+   <select id="mpAcc"><option value="">— No, just record —</option>${accountOptions('')}</select>
    <button class="btn" onclick="doMarkPaid('${id}')">✓ Received</button>
   `);
 }
 function doMarkPaid(id){
   const c=S.cars.find(x=>x.id===id); if(!c)return;
+  const recv=num(document.getElementById('mpAmt').value);
   const acc=document.getElementById('mpAcc').value;
-  if(acc){ c.effect=deposit(acc,c.amount,c.currency); c.account=acc; }   // optional: add to a balance
-  else { delete c.effect; c.account=null; }                              // just mark received, no money moved
-  c.status='paid';
-  carTxnSync(c);
-  save(); closeSheet(); toast(acc?('Received into '+accName(acc)):'Marked received');
+  if(isNaN(recv)||recv<=0)return toast('Enter the amount received');
+  const full = recv >= (c.amount - 0.005);   // received the whole thing
+  if(full){
+    if(acc){ c.effect=deposit(acc,c.amount,c.currency); c.account=acc; }   // optional: add to a balance
+    else { delete c.effect; c.account=null; }                              // just mark received, no money moved
+    c.status='paid'; carTxnSync(c);
+    save(); closeSheet(); toast(acc?('Received into '+accName(acc)):'Marked received');
+  } else {
+    // partial: subtract from the receivable, optionally add the partial to an account
+    const eff = acc ? deposit(acc,recv,c.currency) : null;
+    log('🚗',(c.detail||'Car')+' — partial received','Cars · '+c.country+(acc?' → '+accName(acc):''),recv,c.currency,1,today(),eff?[eff]:null);
+    c.amount=Math.round((c.amount-recv)*100)/100;   // remaining receivable
+    carTxnSync(c);                                   // keep the receivable note at the new remaining
+    save(); closeSheet(); toast('Partial '+fmt(recv,c.currency)+' received · '+fmt(c.amount,c.currency)+' left');
+  }
 }
 /* bulk: pick several (or all) receivable cars and mark them received together */
 function openBulkReceive(){
