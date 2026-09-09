@@ -269,7 +269,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-08-06-partial-recv';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-09-09-thb-travel';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -317,7 +317,7 @@ function cloudPushSoon(){ if(!S.settings.cloudUrl)return; clearTimeout(_pushT); 
 function uid(){ return 'i'+Math.random().toString(36).slice(2,9); }
 
 /* ---------------- MONEY HELPERS ---------------- */
-const R=()=>({QAR:1, JOD:S.settings.rateJODtoQAR, AED:S.settings.rateAEDtoQAR, USD:S.settings.rateUSDtoQAR, ...(S.settings.rates||{})});
+const R=()=>({QAR:1, JOD:S.settings.rateJODtoQAR, AED:S.settings.rateAEDtoQAR, USD:S.settings.rateUSDtoQAR, THB:0.107, ...(S.settings.rates||{})});
 function toQAR(a,c){ return a*(R()[c]||1); }
 function fromQAR(a,c){ return a/(R()[c]||1); }
 // normalize a currency token (incl. Arabic) to a 3-letter code
@@ -1525,7 +1525,7 @@ async function refreshFX(){
     const r=await fetch('https://open.er-api.com/v6/latest/QAR');   // base QAR → rates[X] = X per 1 QAR
     const j=await r.json();
     if(j&&j.rates){
-      const want=['JOD','AED','USD','SAR','EUR','GBP','KWD','BHD','OMR','TRY','INR','EGP','CAD','AUD'];
+      const want=['JOD','AED','USD','SAR','EUR','GBP','KWD','BHD','OMR','TRY','INR','EGP','CAD','AUD','THB'];
       const rates={};
       want.forEach(c=>{ if(j.rates[c]) rates[c]=+(1/j.rates[c]).toFixed(4); });   // QAR per 1 unit
       S.settings.rates={...(S.settings.rates||{}),...rates};
@@ -1889,7 +1889,7 @@ async function doCloudRestore(which){
 function parseSms(raw){
   raw=(''+(raw||''));
   const norm=raw.replace(/[٠-٩]/g,d=>d.charCodeAt(0)-0x0660).replace(/[۰-۹]/g,d=>d.charCodeAt(0)-0x06F0);
-  const CURS='QAR|JOD|JD|AED|SAR|USD|EUR|GBP|KWD|BHD|OMR|TRY|INR|EGP|CAD|AUD';
+  const CURS='QAR|JOD|JD|AED|SAR|USD|EUR|GBP|KWD|BHD|OMR|TRY|INR|EGP|CAD|AUD|THB';
   // available/running balance: number near a "balance"/"الرصيد" keyword (allow a word like المتوفر/available in between)
   let availBalance=NaN, balCur='';
   const bm=norm.match(new RegExp('(?:available\\s*balance|avail\\.?\\s*bal\\.?|balance|bal\\.?|الرصيد(?:\\s*(?:المتوفر|المتاح))?|رصيد)[^0-9]{0,20}?(?:('+CURS+')\\s*)?([\\d,]+(?:\\.\\d+)?)\\s*('+CURS+'|دينار|ريال)?','i'));
@@ -2083,6 +2083,8 @@ function disconnectCloud(){ S.settings.cloudUrl=''; S.settings.cloudKey=''; loca
 function merchantKey(x){ const m = displayTitle(x) || x.title || ''; return (''+m).toLowerCase().replace(/[^a-z0-9؀-ۿ]+/g,' ').trim().slice(0,30); }
 function expenseCat(x){
   if(x.catEdited && x.cat) return remapCat(x.cat);              // user set it manually on this entry → keep it
+  // Thailand (THB / baht) spending → always Travel
+  if(/\bthb\b|\bbaht\b|thailand|bangkok|phuket|pattaya/i.test((smsSource(x)||'')+' '+(x.title||''))) return remapCat('Travel');
   const mem=S.settings.catMemory||{}, k=merchantKey(x);
   if(k && mem[k]) return remapCat(mem[k]);                       // learned from a past correction for this merchant
   // auto: match the MERCHANT name first (most reliable), then fall back to the whole message
