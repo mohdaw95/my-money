@@ -269,7 +269,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-09-09-thb-travel';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-09-24-catmgr-access';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -2203,7 +2203,8 @@ function openExpMonth(mo){
    <button class="btn ghost" style="margin-top:8px" onclick="expSelMode('${mo}')">${_expSel?'✕ Cancel selection':'☑︎ Select entries to bulk-edit category'}</button>
    ${_expSel?`<div class="row" style="gap:8px;align-items:center;margin-top:6px"><select id="expBulkCat" style="flex:1">${catOptions('')}</select><button class="btn" style="width:auto;padding:0 18px" onclick="expBulkApply('${mo}')">Apply</button></div><p class="hint" id="expSelHint">${_expSelIds.size} selected — tick entries, pick a category, then Apply.</p>`:''}
    ${body}
-   <button class="btn ghost" style="margin-top:10px" onclick="openExpMonths()">← All months</button>
+   <div class="row" style="gap:8px;margin-top:10px"><button class="btn ghost" style="flex:1" onclick="openCatManager()">🏷️ Add / rename categories</button><button class="btn ghost" style="flex:1" onclick="openCatFix()">🎯 Fix categories</button></div>
+   <button class="btn ghost" style="margin-top:8px" onclick="openExpMonths()">← All months</button>
   `);
 }
 
