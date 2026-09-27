@@ -269,7 +269,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-09-24-catmgr-access';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-09-27-grp3-picker';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -2123,7 +2123,7 @@ function expByMonth(){
   return m;
 }
 function openExpMonths(){
-  _expSel=false; _expSelIds=new Set();
+  _expSel=false; _expSelIds=new Set(); _expExpanded=new Set();
   const byM=expByMonth(); const months=Object.keys(byM).sort().reverse();
   const grand=months.reduce((s,mo)=>s+byM[mo].total,0);
   openSheet(`
@@ -2138,7 +2138,35 @@ function openExpMonths(){
   `);
 }
 let _expView='newest';   // newest | cat | day | high
-function setExpView(mo,v){ _expView=v; openExpMonth(mo); }
+let _expExpanded=new Set();   // which category/day groups are expanded past the first 3
+function setExpView(mo,v){ _expView=v; _expExpanded=new Set(); openExpMonth(mo); }
+function expToggleGroup(k){ k=decodeURIComponent(k); if(_expExpanded.has(k))_expExpanded.delete(k); else _expExpanded.add(k); openExpMonth(window._expMo); }
+/* a group's rows, capped at 3 with a Show-all/Show-less toggle */
+function expGroupList(key,arr,sortFn){
+  const sorted=arr.slice().sort(sortFn), expanded=_expExpanded.has(key);
+  const shown=expanded?sorted:sorted.slice(0,3);
+  let h=`<div class="list" style="margin-top:6px">${shown.map(expItemRow).join('')}</div>`;
+  if(sorted.length>3) h+=`<button class="del" style="color:var(--accent);margin:2px 0 8px" onclick="expToggleGroup('${encodeURIComponent(key)}')">${expanded?'▲ Show less':'▼ Show all '+sorted.length}</button>`;
+  return h;
+}
+/* quick per-entry category change: tap the 🏷️ icon → pick a category */
+function pickCat(id){
+  const x=S.txns.find(t=>t.id===id); if(!x)return;
+  const cur=expenseCat(x), list=catList();
+  openSheet(`
+   <h2>🏷️ Category</h2>
+   <p class="hint" style="margin-top:0">${esc(displayTitle(x))} · ${fmt(x.amount,x.currency)} — now <b>${esc(cur)}</b></p>
+   <div class="list">${list.map((c,i)=>`<div class="item tap" onclick="setTxnCat('${id}',${i})"><div class="em">${c===cur?'✅':'🏷️'}</div><div class="mid"><div class="t">${esc(c)}</div></div></div>`).join('')}</div>
+  `);
+}
+function setTxnCat(id,i){
+  const x=S.txns.find(t=>t.id===id); if(!x)return;
+  const cat=catList()[i]; if(!cat)return;
+  x.cat=cat; x.catEdited=true;
+  const k=merchantKey(x); if(k){ S.settings.catMemory=S.settings.catMemory||{}; S.settings.catMemory[k]=cat; }   // learn this merchant
+  save(); if(window._expMo) openExpMonth(window._expMo); else closeSheet();
+  toast('→ '+cat);
+}
 function expTs(x){ const d=+((x.date||'').replace(/-/g,''))||0; let t=0; const m=(x.time||'').match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i); if(m){ let h=+m[1]; const ap=(m[3]||'').toLowerCase(); if(ap==='pm'&&h<12)h+=12; if(ap==='am'&&h===12)h=0; t=h*60+ +m[2]; } return d*10000+t; }
 let _expSel=false, _expSelIds=new Set();
 function expItemRow(x){
@@ -2150,7 +2178,7 @@ function expItemRow(x){
       <div class="s">${esc(expenseCat(x))} · ${fmtDate(x.date)}${x.time?' · '+x.time:''}</div></div>
       <div class="amt neg" style="flex:none">${fmt(x.amount,x.currency)}</div></label>`;
   }
-  return `<div class="item"><div class="em">${x.emoji||'🧾'}</div>
+  return `<div class="item"><div class="em tap" onclick="pickCat('${x.id}')" title="Change category" style="cursor:pointer">🏷️</div>
     <div class="mid${smsSource(x)?' tap':''}" ${smsSource(x)?`onclick="showRawMsg('${x.id}')"`:''}><div class="t">${esc(displayTitle(x))}${smsSource(x)?' <span class="dim" style="font-size:12px">💬</span>':''}</div>
     <div class="s">${x.edit&&x.edit.account?accName(x.edit.account)+' · ':''}${fmtDate(x.date)}${x.time?' · '+x.time:''}</div></div>
     <div style="text-align:right"><div class="amt neg">${fmt(x.amount,x.currency)}</div>
@@ -2167,7 +2195,7 @@ function expBulkApply(mo){
   _expSel=false; _expSelIds=new Set(); save(); openExpMonth(mo); toast(n+' moved to '+cat);
 }
 function openExpMonth(mo){
-  _sheetBack=()=>openExpMonth(mo);
+  _sheetBack=()=>openExpMonth(mo); window._expMo=mo;
   const items=S.txns.filter(x=>x.dir<0 && (x.date||'').slice(0,7)===mo);
   const pos=new Map(items.map((x,i)=>[x.id,i]));
   const byNew=(a,b)=> (expTs(b)-expTs(a)) || (pos.get(b.id)-pos.get(a.id));
@@ -2180,13 +2208,13 @@ function openExpMonth(mo){
     const cats=Object.keys(groups).sort((a,b)=>sumQAR(groups[b])-sumQAR(groups[a]));
     body=cats.map(c=>`
       <div class="kv" style="margin-top:8px;border-bottom:2px solid var(--line)"><span style="font-weight:700">${esc(c)}</span><span style="font-weight:700;color:var(--red)">${fmt(sumQAR(groups[c]),'QAR')}</span></div>
-      <div class="list" style="margin-top:6px">${groups[c].slice().sort(byNew).map(expItemRow).join('')}</div>`).join('');
+      ${expGroupList('cat:'+c,groups[c],byNew)}`).join('');
   } else if(_expView==='day'){
     const days={}; items.forEach(x=>{ const d=x.date||today(); (days[d]=days[d]||[]).push(x); });
     const ds=Object.keys(days).sort().reverse();
     body=ds.map(d=>`
       <div class="kv" style="margin-top:8px;border-bottom:2px solid var(--line)"><span style="font-weight:700">${fmtDate(d)}</span><span style="font-weight:700;color:var(--red)">${fmt(sumQAR(days[d]),'QAR')}</span></div>
-      <div class="list" style="margin-top:6px">${days[d].slice().sort(byHigh).map(expItemRow).join('')}</div>`).join('');
+      ${expGroupList('day:'+d,days[d],byHigh)}`).join('');
   } else {
     body=`<div class="list" style="margin-top:6px">${items.slice().sort(_expView==='high'?byHigh:byNew).map(expItemRow).join('')}</div>`;
   }
