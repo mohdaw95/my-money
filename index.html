@@ -269,7 +269,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-09-27-grp3-picker';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-09-28-smart-learn';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -2080,7 +2080,22 @@ function disconnectCloud(){ S.settings.cloudUrl=''; S.settings.cloudKey=''; loca
 
 /* ---------------- EXPENSES BY CATEGORY ---------------- */
 /* a stable key for a merchant, used by the self-learning categoriser */
-function merchantKey(x){ const m = displayTitle(x) || x.title || ''; return (''+m).toLowerCase().replace(/[^a-z0-9؀-ۿ]+/g,' ').trim().slice(0,30); }
+/* normalise a merchant name into a stable key so variants of the SAME shop share one learned category:
+   drops business suffixes (LLC/QFC/WLL/TRADING…), branch/location words and numbers */
+function normMerchantKey(k){
+  return (''+k).toLowerCase().replace(/[^a-z0-9؀-ۿ]+/g,' ')
+    .replace(/\b(cybs|llc|qfc|wll|w l l|trading|trad|ec|inc|co|company|ltd|est|establishment|branch|br|doha|qatar|lusail|wakra|wakrah|rayyan|pearl|mall|center|centre)\b/g,' ')
+    .replace(/\b\d+\b/g,' ')            // branch / location numbers
+    .replace(/\s+/g,' ').trim().slice(0,30);
+}
+function merchantKey(x){ const m = displayTitle(x) || x.title || ''; return normMerchantKey(m) || (''+m).toLowerCase().trim().slice(0,30); }
+/* one-time: re-key existing learned categories to the new normalised keys so nothing already learned is lost */
+function migrateCatMemory(){
+  if(S.settings.catMemV2) return;
+  const old=S.settings.catMemory||{}, nu={};
+  Object.keys(old).forEach(k=>{ const nk=normMerchantKey(k)||k; if(!nu[nk]) nu[nk]=old[k]; });
+  S.settings.catMemory=nu; S.settings.catMemV2=true;
+}
 function expenseCat(x){
   if(x.catEdited && x.cat) return remapCat(x.cat);              // user set it manually on this entry → keep it
   // Thailand (THB / baht) spending → always Travel
@@ -2384,6 +2399,7 @@ function retitleOldSms(){
 
 /* ---------------- INIT ---------------- */
 retitleOldSms();          // re-extract merchant name/time for existing bank-SMS entries (once)
+migrateCatMemory();       // re-key learned categories to the smarter merchant keys (once)
 runAutoSalary();          // add this month's salary automatically if due
 recordDailyBalance();     // snapshot today's total balance for the monthly Difference field
 render();
