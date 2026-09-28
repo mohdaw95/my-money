@@ -269,7 +269,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-09-28-smart-learn';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-09-28-fofo-prepaid';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -284,6 +284,9 @@ async function checkUpdate(){
 let S = load();
 function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)); if(d){ return migrate({...clone(DEFAULT),...d, settings:{...DEFAULT.settings,...(d.settings||{})}, accounts:{...DEFAULT.accounts,...(d.accounts||{})}}); } }catch(e){} return clone(DEFAULT); }
 function accountsTotalQAR(){ let t=0; ACCTS.forEach(a=>{ t+=toQAR(S.accounts[a.key]||0,a.cur); }); return t; }
+/* Qatar Prepaid card spending stops counting as an expense from this date on (older entries untouched) */
+const PREPAID_EXP_CUTOFF='2026-09-28';
+function isExp(x){ return x.dir<0 && !(x.edit && x.edit.account==='qPrepaid' && (x.date||'')>=PREPAID_EXP_CUTOFF); }
 function recordDailyBalance(){ try{ S.settings.balByDay=S.settings.balByDay||{}; S.settings.balByDay[today()]=Math.round(accountsTotalQAR()); }catch(e){} }
 /* change in total account balances across a month (first day → last day) */
 function monthBalanceDiff(mo){
@@ -328,7 +331,7 @@ function goldValueQAR(grams){ return toQAR(grams*S.settings.gold21kJOD,'JOD'); }
 
 function totals(){
   const accQAR={}; let accTotal=0;
-  ACCTS.forEach(a=>{ const q=toQAR(S.accounts[a.key]||0,a.cur); accQAR[a.key]=q; accTotal+=q; });
+  ACCTS.forEach(a=>{ const q=toQAR(S.accounts[a.key]||0,a.cur); accQAR[a.key]=q; if(a.key!=='qPrepaid') accTotal+=q; });   // prepaid card excluded from assets / net worth
   const grams=S.gold.reduce((s,g)=>s+g.grams,0);
   const goldQAR=goldValueQAR(grams);
   const carsRecvQAR=S.cars.filter(c=>c.status==='receivable'||c.status==='inspection').reduce((s,c)=>s+toQAR(c.amount,c.currency),0);   // include inspection cars in the receivable total
@@ -367,7 +370,7 @@ function render(){
   const cmCount = cmCarData.count;
   const _cmExpOv=(S.settings.expOverride||{})[curMonth()];
   const cmExp = (_cmExpOv!=null && _cmExpOv!=='') ? (+_cmExpOv||0)
-    : S.txns.filter(x=>x.dir<0 && (x.date||'').slice(0,7)===curMonth()).reduce((s,x)=>s+toQAR(x.amount,x.currency),0);
+    : S.txns.filter(x=>isExp(x) && (x.date||'').slice(0,7)===curMonth()).reduce((s,x)=>s+toQAR(x.amount,x.currency),0);
   const cmSavings = savingsForMonth(curMonth());
   document.getElementById('cards').innerHTML=
     ACCTS.map(a=>{ const bal=S.accounts[a.key]||0; return `
@@ -433,7 +436,7 @@ function render(){
   document.getElementById('bulkInspBtn').style.display = hasRecv?'block':'none';
 
   // expenses summary — top categories
-  const exps=S.txns.filter(x=>x.dir<0);
+  const exps=S.txns.filter(isExp);
   if(exps.length){
     const g={}; exps.forEach(x=>{ const c=expenseCat(x); g[c]=(g[c]||0)+toQAR(x.amount,x.currency); });
     const top=Object.entries(g).sort((a,b)=>b[1]-a[1]).slice(0,3);
@@ -1907,8 +1910,10 @@ function parseSms(raw){
   return {amount,amtCur,availBalance,balCur,type};
 }
 /* auto-categorise an expense from its merchant / message text */
-const CATEGORIES=['General','Groceries','Food & Dining','Fuel','Transport','Bills','Shopping','Health','Entertainment','Travel','ATM / Cash','Transfer','Car costs','Rent','Other'];
+const CATEGORIES=['General','Groceries','Food & Dining','Fuel','Transport','Bills','Shopping','Health','Entertainment','Travel','ATM / Cash','Transfer','Car costs','Rent','Fofo','Other'];
 const CAT_RULES=[
+  // kids / child spending → Fofo (first so it wins over Entertainment/Shopping)
+  ['Fofo', /\bkids?\b|\bchild(ren)?\b|\bbab(y|ies)\b|\btoys?\b|kidzania|gondolania|nursery|kindergarten|\bschool\b|daycare|day care|diaper|pampers|mothercare|baby\s?shop|pediatric|play\s?area|playground|\bfofo\b|طفل|اطفال|أطفال|طفلة|روضة|حضانة|مدرسة/i],
   ['Groceries', /carrefour|\blulu\b|al\s?meera|almeera|monoprix|supermarket|hypermarket|grocery|baqala|family food|\bsafari\b|megamart|quick\s?mart|mahaseel|saudia|\bansar\b|\bspar\b|\bcoop\b|\bkims\b|fresh market|marches|nesto|masskar|grand\s?hyper|city\s?center\s?super|paris\s?gallery/i],
   ['Food & Dining', /talabat|snoonu|rafeeq|restaurant|\bcafe\b|caffe|coffee|starbucks|mcdonald|\bkfc\b|burger|pizza|domino|subway|dunkin|\bcosta\b|tim\s?horton|shawarma|karak|bakery|baskin|nando|texas|hardee|papa\s?john|krispy|chili|dairy queen|sushi|\bgrill\b|kitchen|bistro|eatery|dining|\bjuice\b|chicken|shake shack|five guys|wendy|popeyes|cheesecake|catering|sweets|patisserie|chocolat|karafirin|\btea\b|\bbbq\b|noodle|kebab|biryani|\bmandi\b|steak|lounge|dhaba|cravia|\bfood\b/i],
   ['Fuel', /woqod|petrol|\bfuel\b|filling station|\bstation\b|\bgas\b/i],
@@ -1988,7 +1993,7 @@ function deleteCat(i){
 function mkey(x){ return merchantKey(x)||('id:'+x.id); }
 function openCatFix(){
   _sheetBack=openCatFix;
-  const exps=S.txns.filter(x=>x.dir<0);
+  const exps=S.txns.filter(isExp);
   const g={};
   exps.forEach(x=>{ const k=mkey(x); if(!g[k])g[k]={key:k,name:displayTitle(x)||x.title||'—',items:[]}; g[k].items.push(x); });
   let rows=Object.values(g).map(r=>({key:r.key,name:r.name,total:sumQAR(r.items),n:r.items.length,cat:expenseCat(r.items[0])}));
@@ -2112,7 +2117,7 @@ function expenseCat(x){
 function sumQAR(arr){ return arr.reduce((s,x)=>s+toQAR(x.amount,x.currency),0); }
 function openExpenses(){
   _sheetBack=openExpenses;
-  const exps=S.txns.filter(x=>x.dir<0);
+  const exps=S.txns.filter(isExp);
   const groups={}; exps.forEach(x=>{ const c=expenseCat(x); (groups[c]=groups[c]||[]).push(x); });
   const cats=Object.keys(groups).sort((a,b)=>sumQAR(groups[b])-sumQAR(groups[a]));
   openSheet(`
@@ -2132,7 +2137,7 @@ function openExpenses(){
 /* This month exp card → months → categories for the chosen month */
 function expByMonth(){
   const m={};
-  S.txns.filter(x=>x.dir<0).forEach(x=>{ const mo=(x.date||today()).slice(0,7); if(!m[mo])m[mo]={total:0,items:[]}; m[mo].total+=toQAR(x.amount,x.currency); m[mo].items.push(x); });
+  S.txns.filter(isExp).forEach(x=>{ const mo=(x.date||today()).slice(0,7); if(!m[mo])m[mo]={total:0,items:[]}; m[mo].total+=toQAR(x.amount,x.currency); m[mo].items.push(x); });
   const ov=S.settings.expOverride||{};       // manual month total overrides the computed one
   Object.keys(ov).forEach(mo=>{ if(ov[mo]!=null&&ov[mo]!==''){ if(!m[mo])m[mo]={total:0,items:[]}; m[mo].total=+ov[mo]||0; m[mo].override=true; } });
   return m;
@@ -2211,7 +2216,7 @@ function expBulkApply(mo){
 }
 function openExpMonth(mo){
   _sheetBack=()=>openExpMonth(mo); window._expMo=mo;
-  const items=S.txns.filter(x=>x.dir<0 && (x.date||'').slice(0,7)===mo);
+  const items=S.txns.filter(x=>isExp(x) && (x.date||'').slice(0,7)===mo);
   const pos=new Map(items.map((x,i)=>[x.id,i]));
   const byNew=(a,b)=> (expTs(b)-expTs(a)) || (pos.get(b.id)-pos.get(a.id));
   const byHigh=(a,b)=> toQAR(b.amount,b.currency)-toQAR(a.amount,a.currency);
