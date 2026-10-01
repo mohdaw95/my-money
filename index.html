@@ -269,7 +269,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-01-insp-received';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-01-bulk-insp-delback';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -1228,6 +1228,23 @@ function carTitleHtml(c){
 /* inspection-only cars: mark the fee as received — only leaves the receivable total; no expense, no "I owe", no balance change */
 function markInspReceived(id,on){ const c=S.cars.find(x=>x.id===id); if(!c||c.status!=='inspection')return; if(on){ c.inspReceived=true; c.inspReceivedDate=today(); } else { delete c.inspReceived; delete c.inspReceivedDate; } save(); if(document.getElementById('scrim').classList.contains('open')) openCars(); toast(on?'Inspection marked received':'Back to pending'); }
 function markAllInspReceived(){ let n=0; S.cars.forEach(c=>{ if(c.status==='inspection'&&!c.inspReceived){ c.inspReceived=true; c.inspReceivedDate=today(); n++; } }); save(); openCars(); toast(n+' inspection'+(n!==1?'s':'')+' marked received'); }
+/* bulk: tick only the inspections you want, then mark those received */
+function openBulkInspReceived(){
+  _sheetBack=openCars;
+  const pend=S.cars.filter(c=>c.status==='inspection'&&!c.inspReceived).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  if(!pend.length)return toast('No pending inspections');
+  openSheet(`
+   <h2>☑︎ Mark inspections received</h2>
+   <p class="hint" style="margin-top:0">Tick only the ones you got paid for. Nothing else changes — no expense, no “I owe”, no balance.</p>
+   <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px"><label style="cursor:pointer"><input type="checkbox" id="birAll" onchange="document.querySelectorAll('.birChk').forEach(c=>c.checked=this.checked);birSum()" style="width:18px;height:18px;margin-right:8px;vertical-align:middle">Select all (${pend.length})</label><span id="birSum" class="sub"></span></div>
+   <div class="list" style="max-height:52vh;overflow:auto" onchange="birSum()">${pend.map(c=>`<label class="item" style="cursor:pointer;align-items:center"><input type="checkbox" class="birChk" value="${c.id}" style="width:20px;height:20px;margin-right:10px;flex:none"><div class="mid" style="min-width:0">${carTitleHtml(c)}<div class="s">${fmtDate(c.date)}</div></div><div class="amt" style="flex:none">${fmt(c.amount,c.currency)}</div></label>`).join('')}</div>
+   <button class="btn" onclick="doBulkInspReceived()">✓ Mark selected received</button>
+   <button class="btn ghost" onclick="openCars()">← Back</button>
+  `, openCars);
+  birSum();
+}
+function birSum(){ const ids=[...document.querySelectorAll('.birChk')].filter(c=>c.checked).map(c=>c.value); let t=0; ids.forEach(id=>{ const c=S.cars.find(x=>x.id===id); if(c)t+=toQAR(c.amount,c.currency); }); const el=document.getElementById('birSum'); if(el)el.textContent=ids.length+' selected · '+fmt(t,'QAR'); const all=document.getElementById('birAll'), tot=document.querySelectorAll('.birChk').length; if(all)all.checked=ids.length===tot&&tot>0; }
+function doBulkInspReceived(){ const ids=[...document.querySelectorAll('.birChk')].filter(c=>c.checked).map(c=>c.value); if(!ids.length)return toast('Select at least one'); let n=0; ids.forEach(id=>{ const c=S.cars.find(x=>x.id===id); if(c&&c.status==='inspection'&&!c.inspReceived){ c.inspReceived=true; c.inspReceivedDate=today(); n++; } }); save(); openCars(); toast(n+' inspection'+(n!==1?'s':'')+' marked received'); }
 function carRow(c,received){
   return `<div class="item"><div class="em">🚗</div><div class="mid" style="min-width:0">
       ${carTitleHtml(c)}
@@ -1257,7 +1274,7 @@ function openCars(){
    <div class="list" style="margin-top:6px">${pending.length?pending.map(c=>carRow(c,false)).join(''):'<div class="empty">Nothing pending — all received 🎉</div>'}</div>
    ${inspections.length?`
    <div class="kv" style="margin-top:16px"><span style="font-weight:800">🔍 Inspection only · ${inspPend.length} pending</span><span style="font-weight:800">${fmt(inspPend.reduce((s,c)=>s+toQAR(c.amount,c.currency),0),'QAR')}</span></div>
-   ${inspPend.length>1?`<button class="btn ghost" style="margin-top:6px" onclick="markAllInspReceived()">✓ Mark all ${inspPend.length} inspections received</button>`:''}
+   ${inspPend.length>1?`<button class="btn ghost" style="margin-top:6px" onclick="openBulkInspReceived()">☑︎ Select inspections to mark received</button>`:''}
    <div class="list" style="margin-top:6px;opacity:.82">${inspections.map(c=>carRow(c,true)).join('')}</div>`:''}
    ${paid.length?`
    <div class="kv" style="margin-top:16px"><span style="font-weight:800">✓ Received · history</span><span style="font-weight:800;color:var(--green)">${fmt(paidTot,'QAR')}</span></div>
@@ -1693,9 +1710,13 @@ function closeRawMsg(){
   if(_sheetBack){ const f=_sheetBack; f(); const sh=document.getElementById('sheet'); if(sh) sh.scrollTop=window._listScroll||0; }   // back to the list, same spot
   else closeSheet();
 }
-function delTxn(id){ const x=S.txns.find(t=>t.id===id); if(!x)return; if(!confirm('Delete this entry? Any money it moved will be put back.'))return; reverseEffects(x.effects); if(x.restorePR){ S.pr.push(x.restorePR); } S.txns=S.txns.filter(t=>t.id!==id); save(); openHistory(); toast('Deleted'); }
+function backToList(){ if(_sheetBack){ const f=_sheetBack; f(); const sh=document.getElementById('sheet'); if(sh) sh.scrollTop=window._listScroll||0; } else closeSheet(); }
+function delTxn(id){ const x=S.txns.find(t=>t.id===id); if(!x)return; if(!confirm('Delete this entry? Any money it moved will be put back.'))return; reverseEffects(x.effects); if(x.restorePR){ S.pr.push(x.restorePR); } if(!document.getElementById('etAmt')){ const sh=document.getElementById('sheet'); window._listScroll=sh?sh.scrollTop:0; }   // deleting straight from a list → remember the spot
+  const back=_sheetBack;   // render() (inside save) clears it, so keep it
+  S.txns=S.txns.filter(t=>t.id!==id); save(); _sheetBack=back; backToList(); toast('Deleted'); }
 function editTxn(id){
   const x=S.txns.find(t=>t.id===id); if(!x||!x.edit)return toast('This entry can only be deleted');
+  { const sh=document.getElementById('sheet'); window._listScroll=(sh&&document.getElementById('scrim').classList.contains('open'))?sh.scrollTop:0; }
   openSheet(`
    <h2>✎ Edit ${x.edit.kind}</h2>
    <label class="f">Amount</label>
