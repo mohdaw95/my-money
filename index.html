@@ -221,13 +221,23 @@ function routeAccount(raw, fallback){
   return fallback || 'qDebit';
 }
 /* revenue earned per exported car — editable rates in settings, plus optional per-car override (c.rev) */
+/* one-time: UAE default revenue 850 → 500 for NEW cars; past cars/entries keep 850 */
+function migrateUaeRate(){
+  if(S.settings.uaeRate500) return;
+  if(+S.settings.carRevUAE===850){
+    (S.carRevEntries||[]).forEach(e=>{ if(e.country==='UAE'&&e.rate==null) e.rate=850; });
+    S.cars.forEach(c=>{ if(c.country==='UAE'&&c.status!=='inspection'&&(c.rev==null||c.rev==='')&&(c.commission==null||c.commission==='')) c.rev=850; });
+    S.settings.carRevUAE=500;
+  }
+  S.settings.uaeRate500=true;
+}
 function carRate(country){ return country==='UAE' ? (+S.settings.carRevUAE||0) : (+S.settings.carRevQatar||0); }
 function carRev(c){ if(c.rev!=null && c.rev!=='') return +c.rev||0; if(c.commission!=null && c.commission!=='') return +c.commission||0; return carRate(c.country); }
 function carRevByMonth(){
   const m={};
   const slot=mo=>{ if(!m[mo])m[mo]={total:0,count:0,cars:[],entries:[]}; return m[mo]; };
   S.cars.filter(c=>c.status!=='inspection').forEach(c=>{ const s=slot((c.date||today()).slice(0,7)); s.total+=carRev(c); s.count++; s.cars.push(c); });
-  (S.carRevEntries||[]).forEach(e=>{ const s=slot((e.date||today()).slice(0,7)); const rev=(+e.count||0)*carRate(e.country); s.total+=rev; s.count+=(+e.count||0); s.entries.push(e); });
+  (S.carRevEntries||[]).forEach(e=>{ const s=slot((e.date||today()).slice(0,7)); const rev=(+e.count||0)*(e.rate!=null?+e.rate:carRate(e.country)); s.total+=rev; s.count+=(+e.count||0); s.entries.push(e); });
   const ov=S.settings.carRevOverride||{};   // manual month total overrides the computed one
   Object.keys(ov).forEach(mo=>{ if(ov[mo]!=null&&ov[mo]!==''){ slot(mo).total=+ov[mo]||0; m[mo].override=true; } });
   return m;
@@ -237,7 +247,7 @@ function acct(k){ return ACCTS.find(a=>a.key===k); }
 const DEFAULT={
   settings:{ rateJODtoQAR:5.13, rateAEDtoQAR:0.9942, rateUSDtoQAR:3.64,
              gold21kJOD:47, goldUpdated:null, fxUpdated:null, liraGrams:8, lastBackup:null,
-             cloudUrl:'', cloudKey:'', lastSync:null, lastCloudBackup:null, carRevUAE:850, carRevQatar:1000,
+             cloudUrl:'', cloudKey:'', lastSync:null, lastCloudBackup:null, carRevUAE:500, carRevQatar:1000,
              monthlySalary:19250, salaryByMonth:{}, savingsByMonth:{'2026-06':12000},
              carRevOverride:{'2026-05':10400}, expOverride:{'2026-05':28389}, catMemory:{}, customCats:[], catRename:{},
              exitBasic:9000, exitStart:'2021-11-01',
@@ -269,7 +279,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-01-bulk-insp-delback';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-02-uae500';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -1868,6 +1878,7 @@ async function syncCloud(opts){
     if(d.state && ((d.updatedAt||0) > (S.updatedAt||0) || localEmpty)){        // remote is newer → adopt
       S={...clone(DEFAULT),...d.state}; localStorage.setItem(LS,JSON.stringify(S));
       retitleOldSms();                                        // re-title merchants on the freshly-adopted data
+      migrateUaeRate(); migrateCatMemory();                  // re-apply one-time migrations to adopted data
       render();
     }
     const ri=await fetch(base+'/inbox',{headers:cloudHeaders()});
@@ -2431,6 +2442,7 @@ function retitleOldSms(){
 
 /* ---------------- INIT ---------------- */
 retitleOldSms();          // re-extract merchant name/time for existing bank-SMS entries (once)
+migrateUaeRate();         // UAE default car revenue 850 → 500 (once)
 migrateCatMemory();       // re-key learned categories to the smarter merchant keys (once)
 runAutoSalary();          // add this month's salary automatically if due
 recordDailyBalance();     // snapshot today's total balance for the monthly Difference field
