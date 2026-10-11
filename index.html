@@ -291,7 +291,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-11-avgday-card';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-11-analysis-card';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -448,6 +448,11 @@ function render(){
       ${(()=>{ const b=monthBalanceDiff(curMonth()); return b
         ? `<div class="bal" style="color:${b.diff>=0?'var(--green)':'var(--red)'}">${b.diff>=0?'+':'−'}${fmt(Math.abs(b.diff),'QAR')}</div><div class="sub">${monthLabel(curMonth())} · ${b.kind}</div>`
         : `<div class="bal" style="color:var(--muted)">—</div><div class="sub">building history…</div>`; })()}
+    </div>
+    <div class="acard tap" onclick="openExpMonth(curMonth())">
+      <div class="ic">📊</div><div class="nm">Analysis</div>
+      ${(()=>{ const items=S.txns.filter(x=>isExp(x)&&(x.date||'').slice(0,7)===curMonth()); const g={}; items.forEach(x=>{const c=expenseCat(x); g[c]=(g[c]||0)+toQAR(x.amount,x.currency);}); const top=Object.entries(g).sort((a,b)=>b[1]-a[1])[0];
+        return `<div class="bal" style="font-size:15px">${top?esc(top[0])+' '+fmt(top[1],'QAR'):'—'}</div><div class="sub">top category · category / day / newest</div>`; })()}
     </div>
     <div class="acard tap" onclick="openAvgDay()">
       <div class="ic">📆</div><div class="nm">Avg exp / day</div>
@@ -2372,6 +2377,7 @@ function openExpMonth(mo){
   const seg=(v,l)=>`<button class="${_expView===v?'on':''}" onclick="setExpView('${mo}','${v}')">${l}</button>`;
   openSheet(`
    <h2>🧾 ${monthLabel(mo)}</h2>
+   ${(()=>{ const ms=[...new Set(S.txns.filter(isExp).map(x=>(x.date||'').slice(0,7)))].filter(Boolean).sort().reverse().slice(0,12); if(!ms.includes(mo)) ms.unshift(mo); return `<div class="chiprow">${ms.map(m=>`<button class="${m===mo?'on':''}" onclick="openExpMonth('${m}')">${monthLabel(m).replace(' 20',' ’')}</button>`).join('')}</div>`; })()}
    <div class="kv"><span style="font-weight:800">Total spent${g.override?' <span class="badge">manual</span>':''}</span><span style="font-weight:800;color:var(--red)">${fmt(g.total,'QAR')}</span></div>
    ${(()=>{ const b=monthBalanceDiff(mo); return b?`<div class="kv"><span style="font-weight:700">Difference (${b.kind})</span><span style="font-weight:700;color:${b.diff>=0?'var(--green)':'var(--red)'}">${b.diff>=0?'+':'−'}${fmt(Math.abs(b.diff),'QAR')}</span></div><p class="hint" style="margin-top:2px">${b.kind=='net worth'?'Net worth':'Total balance'} ${fmt(b.opening,'QAR')} (start) → ${fmt(b.closing,'QAR')} (${mo===curMonth()?'now':'end'})</p>`:''; })()}
    <label class="f">✎ Set month total manually (QAR)</label>
