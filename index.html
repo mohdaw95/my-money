@@ -291,7 +291,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-11-analysis-card';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-11-uptoday-breakdown';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -2254,15 +2254,49 @@ function expCompareHtml(mo){
   const ms=[mo,monthShift(mo,-1),monthShift(mo,-2)]; const st=ms.map(m=>expStats(m,dayCap));
   const short=m=>{ const p=m.split('-'); return new Date(+p[0],+p[1]-1,1).toLocaleDateString('en',{month:'short'}); };
   const cell=(v,base)=>{ const d=base!=null&&base>0?Math.round((v-base)/base*100):null; return `<div style="text-align:center"><div style="font-weight:700">${fmt(v,'QAR')}</div>${d!=null?`<div class="s" style="color:${d>0?'var(--red)':'var(--green)'}">${d>0?'▲':'▼'} ${Math.abs(d)}%</div>`:'<div class="s">—</div>'}</div>`; };
-  const row=(label,pick)=>`<div class="kv" style="align-items:flex-start"><span class="s" style="flex:1.2">${label}</span>${st.map((s,i)=>`<span style="flex:1">${cell(pick(s),i<2?pick(st[i+1]):null)}</span>`).join('')}</div>`;
+  const row=(label,pick,click)=>`<div class="kv" style="align-items:flex-start"><span class="s" style="flex:1.2">${label}${click?' <span class="dim" style="font-size:11px">tap ›</span>':''}</span>${st.map((s,i)=>`<span style="flex:1${click?';cursor:pointer':''}" ${click?`onclick="${click(ms[i])}"`:''}>${cell(pick(s),i<2?pick(st[i+1]):null)}</span>`).join('')}</div>`;
   return `<div style="margin:10px 0 4px">
    <div class="kv" style="border-bottom:2px solid var(--line)"><span class="s" style="flex:1.2">vs previous months</span>${ms.map(m=>`<span style="flex:1;text-align:center;font-weight:700">${short(m)}</span>`).join('')}</div>
    ${row('Avg / day',s=>s.avg)}
-   ${row('Up to day '+dayCap,s=>s.dtd)}
+   ${row('Up to day '+dayCap,s=>s.dtd,m=>`openUpToDay('${m}',${dayCap})`)}
    ${row('Month total',s=>s.total)}
    ${row('Fixed (rent/CliQ) — not in avg',s=>s.excluded)}
    <p class="hint" style="margin-top:2px">▲▼ = change vs the month before it. Avg/day and "Up to day ${dayCap}" leave out rent and the monthly CliQ transfer; Month total includes everything.</p>
   </div>`;
+}
+/* daily spending bar chart for a month (fixed monthly items left out, same as avg/day) */
+function dailyChartHtml(mo){
+  const nd=daysInMonth(mo), isCur=mo===curMonth(), lastDay=isCur?Math.max(1,+today().slice(8,10)):nd;
+  const per=Array(nd+1).fill(0);
+  S.txns.filter(x=>isExp(x)&&(x.date||'').slice(0,7)===mo&&!isFixedMonthly(x)).forEach(x=>{ const d=+(x.date||'').slice(8,10); if(d>=1&&d<=nd) per[d]+=toQAR(x.amount,x.currency); });
+  const days=per.slice(1), max=Math.max(1,...days), spent=days.slice(0,lastDay).reduce((a,b)=>a+b,0), avg=spent/lastDay;
+  const W=340,H=150,L=34,B=22,T=10, cw=(W-L-6)/nd, ph=H-T-B;
+  const y=v=>T+ph-(v/max)*ph;
+  const bars=days.map((v,i)=>{ const d=i+1, x=L+i*cw; const future=isCur&&d>lastDay;
+    return `<rect x="${(x+cw*0.15).toFixed(1)}" y="${y(v).toFixed(1)}" width="${(cw*0.7).toFixed(1)}" height="${(ph-(y(v)-T)).toFixed(1)}" rx="1.5" fill="${v>avg?'var(--red)':'var(--accent)'}" opacity="${future?0.15:(v>0?0.9:0.25)}"><title>${fmtDate(mo+'-'+String(d).padStart(2,'0'))}: ${fmt(v,'QAR')}</title></rect>`; }).join('');
+  const xl=[1,5,10,15,20,25,nd].filter((d,i,a)=>a.indexOf(d)===i).map(d=>`<text x="${(L+(d-0.5)*cw).toFixed(1)}" y="${H-6}" font-size="9" text-anchor="middle" fill="var(--muted)">${d}</text>`).join('');
+  const yl=[0,0.5,1].map(f=>`<text x="${L-4}" y="${(y(max*f)+3).toFixed(1)}" font-size="9" text-anchor="end" fill="var(--muted)">${Math.round(max*f).toLocaleString('en')}</text>`).join('');
+  const peak=days.indexOf(max);
+  return `<div style="margin:8px 0 4px">
+   <div class="between"><span class="s">Daily spending · ${monthLabel(mo)}</span><span class="s">avg <b>${fmt(avg,'QAR')}</b>/day · peak day ${peak+1}: <b>${fmt(max,'QAR')}</b></span></div>
+   <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;margin-top:4px">${yl}${bars}
+     <line x1="${L}" x2="${W-4}" y1="${y(avg).toFixed(1)}" y2="${y(avg).toFixed(1)}" stroke="var(--green)" stroke-dasharray="4 3" stroke-width="1.2"/>
+     <text x="${W-4}" y="${(y(avg)-3).toFixed(1)}" font-size="9" text-anchor="end" fill="var(--green)">avg</text>${xl}</svg>
+   <p class="hint" style="margin-top:2px">Red bars = above the month's average. Rent / monthly CliQ not included. Tap a bar for the exact amount.</p>
+  </div>`;
+}
+function openUpToDay(mo,dayCap){
+  _sheetBack=()=>openAvgDay(_avgMo||curMonth());
+  const items=S.txns.filter(x=>isExp(x)&&(x.date||'').slice(0,7)===mo&&!isFixedMonthly(x)&&+(x.date||'').slice(8,10)<=dayCap)
+    .sort((a,b)=>toQAR(b.amount,b.currency)-toQAR(a.amount,a.currency));
+  const tot=sumQAR(items);
+  openSheet(`
+   <h2>📋 ${monthLabel(mo)} · up to day ${dayCap}</h2>
+   <div class="kv"><span style="font-weight:800">${items.length} expenses · high → low</span><span style="font-weight:800;color:var(--red)">${fmt(tot,'QAR')}</span></div>
+   <div class="list" style="margin-top:8px">${items.length?items.map(x=>`<div class="item"><div class="em">🧾</div><div class="mid" style="min-width:0"><div class="t">${esc(displayTitle(x))}</div><div class="s">${esc(expenseCat(x))} · ${fmtDate(x.date)}${x.time?' · '+x.time:''}</div></div><div class="amt neg" style="flex:none">${fmt(x.amount,x.currency)}</div></div>`).join(''):'<div class="empty">Nothing in this range.</div>'}</div>
+   <p class="hint">Rent / monthly CliQ not included (same as the avg/day numbers).</p>
+   <button class="btn ghost" onclick="openAvgDay('${_avgMo||curMonth()}')">← Back</button>
+  `, ()=>openAvgDay(_avgMo||curMonth()));
 }
 let _avgMo=null;
 function openAvgDay(mo){
@@ -2273,6 +2307,7 @@ function openAvgDay(mo){
   openSheet(`
    <h2>📆 Avg expense per day</h2>
    <div class="chiprow">${months.map(m=>`<button class="${m===mo?'on':''}" onclick="openAvgDay('${m}')" style="white-space:nowrap">${monthLabel(m).replace(' 20',' ’')}</button>`).join('')}</div>
+   ${dailyChartHtml(mo)}
    ${expCompareHtml(mo)}
    <p class="hint">Left out of avg/day: category <b>${esc(e.cats.join(', '))}</b> and anything containing <b>${esc(e.words.join(' / '))}</b>.</p>
   `);
