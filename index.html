@@ -291,7 +291,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-11-uptoday-breakdown';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-11-swap-cards';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -443,11 +443,10 @@ function render(){
       <div class="bal" style="color:var(--red)">${fmt(cmExp,'QAR')}</div>
       <div class="sub">${monthLabel(curMonth())}</div>
     </div>
-    <div class="acard tap" onclick="openDiffMonths()">
-      <div class="ic">📉</div><div class="nm">Difference</div>
-      ${(()=>{ const b=monthBalanceDiff(curMonth()); return b
-        ? `<div class="bal" style="color:${b.diff>=0?'var(--green)':'var(--red)'}">${b.diff>=0?'+':'−'}${fmt(Math.abs(b.diff),'QAR')}</div><div class="sub">${monthLabel(curMonth())} · ${b.kind}</div>`
-        : `<div class="bal" style="color:var(--muted)">—</div><div class="sub">building history…</div>`; })()}
+    <div class="acard tap" onclick="openSavings()">
+      <div class="ic">🐖</div><div class="nm">Savings this month</div>
+      <div class="bal" style="color:${cmSavings>=0?'var(--green)':'var(--red)'}">${fmt(cmSavings,'QAR')}</div>
+      <div class="sub">salary + car rev − exp</div>
     </div>
     <div class="acard tap" onclick="openExpMonth(curMonth())">
       <div class="ic">📊</div><div class="nm">Analysis</div>
@@ -459,10 +458,11 @@ function render(){
       ${(()=>{ const cur=curMonth(), day=Math.max(1,+today().slice(8,10)); const a=expStats(cur,day), b=expStats(monthShift(cur,-1),daysInMonth(monthShift(cur,-1))); const d=b.avg>0?Math.round((a.avg-b.avg)/b.avg*100):null;
         return `<div class="bal" style="color:var(--red)">${fmt(a.avg,'QAR')}</div><div class="sub">${d==null?monthLabel(cur):`<span style="color:${d>0?'var(--red)':'var(--green)'}">${d>0?'▲':'▼'} ${Math.abs(d)}%</span> vs last month`}</div>`; })()}
     </div>
-    <div class="acard tap" onclick="openSavings()">
-      <div class="ic">🐖</div><div class="nm">Savings this month</div>
-      <div class="bal" style="color:${cmSavings>=0?'var(--green)':'var(--red)'}">${fmt(cmSavings,'QAR')}</div>
-      <div class="sub">salary + car rev − exp</div>
+    <div class="acard tap" onclick="openDiffMonths()">
+      <div class="ic">📉</div><div class="nm">Difference</div>
+      ${(()=>{ const b=monthBalanceDiff(curMonth()); return b
+        ? `<div class="bal" style="color:${b.diff>=0?'var(--green)':'var(--red)'}">${b.diff>=0?'+':'−'}${fmt(Math.abs(b.diff),'QAR')}</div><div class="sub">${monthLabel(curMonth())} · ${b.kind}</div>`
+        : `<div class="bal" style="color:var(--muted)">—</div><div class="sub">building history…</div>`; })()}
     </div>`;
 
   // cars list — pending (receivable) first, then newest date first
