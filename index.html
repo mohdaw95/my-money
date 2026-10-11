@@ -245,6 +245,12 @@ function migrateUaeRate(){
 function carRate(country){ return country==='UAE' ? (+S.settings.carRevUAE||0) : (+S.settings.carRevQatar||0); }
 function carRevGross(c){ if(c.rev!=null && c.rev!=='') return +c.rev||0; if(c.commission!=null && c.commission!=='') return +c.commission||0; return carRate(c.country); }
 function carRev(c){ return carRevGross(c) - (+c.otherExp||0); }   // "Other exp" reduces car revenue only, not the receivable
+function carRevToDay(mo,dayCap){
+  const inMo=x=>(x.date||'').slice(0,7)===mo && +(x.date||'').slice(8,10)<=dayCap;
+  const cars=S.cars.filter(c=>c.status!=='inspection'&&inMo(c)).reduce((s,c)=>s+carRev(c),0);
+  const ents=(S.carRevEntries||[]).filter(inMo).reduce((s,e)=>s+(+e.count||0)*(e.rate!=null?+e.rate:carRate(e.country)),0);
+  return cars+ents;
+}
 function carRevByMonth(){
   const m={};
   const slot=mo=>{ if(!m[mo])m[mo]={total:0,count:0,cars:[],entries:[]}; return m[mo]; };
@@ -291,7 +297,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-11-avg-color';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-11-carrev-dtd';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -437,6 +443,9 @@ function render(){
       <div class="ic">📤</div><div class="nm">Rev from cars</div>
       <div class="bal" style="color:var(--green)">${fmt(cmRev,'QAR')}</div>
       <div class="sub">${monthLabel(curMonth())} · ${cmCount} car${cmCount!==1?'s':''}</div>
+      ${(()=>{ const day=Math.max(1,+today().slice(8,10)); const a=carRevToDay(curMonth(),day), b=carRevToDay(monthShift(curMonth(),-1),day);
+        if(!(b>0)) return ''; const d=Math.round((a-b)/b*100); const col=d>=5?'var(--green)':(d<=-5?'var(--red)':'var(--amber)');
+        return `<div class="sub" style="color:${col}">${d>0?'▲':(d<0?'▼':'=')} ${Math.abs(d)}% vs last month · to day ${day}</div>`; })()}
     </div>
     <div class="acard tap" onclick="openExpMonths()">
       <div class="ic">🧾</div><div class="nm">This month exp</div>
