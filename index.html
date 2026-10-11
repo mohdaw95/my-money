@@ -291,7 +291,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-11-swap-cards';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-11-avg-color';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -456,7 +456,8 @@ function render(){
     <div class="acard tap" onclick="openAvgDay()">
       <div class="ic">📆</div><div class="nm">Avg exp / day</div>
       ${(()=>{ const cur=curMonth(), day=Math.max(1,+today().slice(8,10)); const a=expStats(cur,day), b=expStats(monthShift(cur,-1),daysInMonth(monthShift(cur,-1))); const d=b.avg>0?Math.round((a.avg-b.avg)/b.avg*100):null;
-        return `<div class="bal" style="color:var(--red)">${fmt(a.avg,'QAR')}</div><div class="sub">${d==null?monthLabel(cur):`<span style="color:${d>0?'var(--red)':'var(--green)'}">${d>0?'▲':'▼'} ${Math.abs(d)}%</span> vs last month`}</div>`; })()}
+        const col = d==null ? 'var(--text)' : (d<=-5 ? 'var(--green)' : (d>=5 ? 'var(--red)' : 'var(--amber)'));   // better / about the same (±5%) / worse than last month
+        return `<div class="bal" style="color:${col}">${fmt(a.avg,'QAR')}</div><div class="sub">${d==null?monthLabel(cur):`<span style="color:${col}">${d>0?'▲':(d<0?'▼':'=')} ${Math.abs(d)}%</span> vs last month`}</div>`; })()}
     </div>
     <div class="acard tap" onclick="openDiffMonths()">
       <div class="ic">📉</div><div class="nm">Difference</div>
