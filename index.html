@@ -297,7 +297,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-11-nw-vs-lastmonth';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-11-no-analysis';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -462,11 +462,6 @@ function render(){
       <div class="ic">🐖</div><div class="nm">Savings this month</div>
       <div class="bal" style="color:${cmSavings>=0?'var(--green)':'var(--red)'}">${fmt(cmSavings,'QAR')}</div>
       <div class="sub">salary + car rev − exp</div>
-    </div>
-    <div class="acard tap" onclick="openExpMonth(curMonth())">
-      <div class="ic">📊</div><div class="nm">Analysis</div>
-      ${(()=>{ const items=S.txns.filter(x=>isExp(x)&&(x.date||'').slice(0,7)===curMonth()); const g={}; items.forEach(x=>{const c=expenseCat(x); g[c]=(g[c]||0)+toQAR(x.amount,x.currency);}); const top=Object.entries(g).sort((a,b)=>b[1]-a[1])[0];
-        return `<div class="bal" style="font-size:15px">${top?esc(top[0])+' '+fmt(top[1],'QAR'):'—'}</div><div class="sub">top category · category / day / newest</div>`; })()}
     </div>
     <div class="acard tap" onclick="openAvgDay()">
       <div class="ic">📆</div><div class="nm">Avg exp / day</div>
