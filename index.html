@@ -289,7 +289,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-11-cat-stable';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-11-exp-compare';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -2199,6 +2199,30 @@ function expByMonth(){
   Object.keys(ov).forEach(mo=>{ if(ov[mo]!=null&&ov[mo]!==''){ if(!m[mo])m[mo]={total:0,items:[]}; m[mo].total=+ov[mo]||0; m[mo].override=true; } });
   return m;
 }
+/* month comparison: avg per day + spend up to the same day, this month vs the previous two */
+function monthShift(mo,k){ const p=mo.split('-'); const d=new Date(+p[0],+p[1]-1+k,1); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+function daysInMonth(mo){ const p=mo.split('-'); return new Date(+p[0],+p[1],0).getDate(); }
+function expStats(mo,dayCap){
+  const items=S.txns.filter(x=>isExp(x)&&(x.date||'').slice(0,7)===mo);
+  const g=expByMonth()[mo]; const total=g?g.total:0;
+  const isCur=mo===curMonth(); const days=isCur?Math.max(1,+today().slice(8,10)):daysInMonth(mo);
+  const dtd=items.filter(x=>+(x.date||'').slice(8,10)<=dayCap).reduce((s,x)=>s+toQAR(x.amount,x.currency),0);
+  return {total,days,avg:total/days,dtd};
+}
+function expCompareHtml(mo){
+  const dayCap = mo===curMonth() ? Math.max(1,+today().slice(8,10)) : daysInMonth(mo);
+  const ms=[mo,monthShift(mo,-1),monthShift(mo,-2)]; const st=ms.map(m=>expStats(m,dayCap));
+  const short=m=>{ const p=m.split('-'); return new Date(+p[0],+p[1]-1,1).toLocaleDateString('en',{month:'short'}); };
+  const cell=(v,base)=>{ const d=base!=null&&base>0?Math.round((v-base)/base*100):null; return `<div style="text-align:center"><div style="font-weight:700">${fmt(v,'QAR')}</div>${d!=null?`<div class="s" style="color:${d>0?'var(--red)':'var(--green)'}">${d>0?'▲':'▼'} ${Math.abs(d)}%</div>`:'<div class="s">—</div>'}</div>`; };
+  const row=(label,pick)=>`<div class="kv" style="align-items:flex-start"><span class="s" style="flex:1.2">${label}</span>${st.map((s,i)=>`<span style="flex:1">${cell(pick(s),i<2?pick(st[i+1]):null)}</span>`).join('')}</div>`;
+  return `<div style="margin:10px 0 4px">
+   <div class="kv" style="border-bottom:2px solid var(--line)"><span class="s" style="flex:1.2">vs previous months</span>${ms.map(m=>`<span style="flex:1;text-align:center;font-weight:700">${short(m)}</span>`).join('')}</div>
+   ${row('Avg / day',s=>s.avg)}
+   ${row('Up to day '+dayCap,s=>s.dtd)}
+   ${row('Month total',s=>s.total)}
+   <p class="hint" style="margin-top:2px">▲▼ = change vs the month before it. "Up to day ${dayCap}" compares the same number of days in each month.</p>
+  </div>`;
+}
 function openExpMonths(){
   _expSel=false; _expSelIds=new Set(); _expExpanded=new Set();
   const byM=expByMonth(); const months=Object.keys(byM).sort().reverse();
@@ -2206,7 +2230,9 @@ function openExpMonths(){
   openSheet(`
    <h2>🧾 Expenses by month</h2>
    <div class="kv"><span style="font-weight:800">All-time spent</span><span style="font-weight:800;color:var(--red)">${fmt(grand,'QAR')}</span></div>
-   <div class="list" style="margin-top:10px">${months.length? months.map(mo=>`
+   ${expCompareHtml(curMonth())}
+   <label class="f" style="margin-top:6px">Pick a month → per day / per category</label>
+   <div class="list" style="margin-top:6px">${months.length? months.map(mo=>`
      <div class="item tap" onclick="openExpMonth('${mo}')"><div class="em">📅</div>
      <div class="mid"><div class="t">${monthLabel(mo)}${mo===curMonth()?' <span class="badge paid">this month</span>':''}</div>
      <div class="s">${byM[mo].items.length} item${byM[mo].items.length!==1?'s':''}</div></div>
@@ -2300,6 +2326,7 @@ function openExpMonth(mo){
    <h2>🧾 ${monthLabel(mo)}</h2>
    <div class="kv"><span style="font-weight:800">Total spent${g.override?' <span class="badge">manual</span>':''}</span><span style="font-weight:800;color:var(--red)">${fmt(g.total,'QAR')}</span></div>
    ${(()=>{ const b=monthBalanceDiff(mo); return b?`<div class="kv"><span style="font-weight:700">Difference (accounts)</span><span style="font-weight:700;color:${b.diff>=0?'var(--green)':'var(--red)'}">${b.diff>=0?'+':'−'}${fmt(Math.abs(b.diff),'QAR')}</span></div><p class="hint" style="margin-top:2px">Total balance ${fmt(b.opening,'QAR')} (start) → ${fmt(b.closing,'QAR')} (${mo===curMonth()?'now':'end'})</p>`:''; })()}
+   ${expCompareHtml(mo)}
    <label class="f">✎ Set month total manually (QAR)</label>
    <input id="expOv" type="text" inputmode="decimal" value="${(S.settings.expOverride||{})[mo]!=null?(S.settings.expOverride||{})[mo]:''}" placeholder="leave blank to auto-total">
    <button class="btn" style="margin-top:8px" onclick="saveMonthOverride('expOverride','${mo}','expOv',openExpMonth)">Save total</button>
