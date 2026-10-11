@@ -222,6 +222,15 @@ function routeAccount(raw, fallback){
 }
 /* revenue earned per exported car — editable rates in settings, plus optional per-car override (c.rev) */
 /* one-time: UAE default revenue 850 → 500 for NEW cars; past cars/entries keep 850 */
+/* one-time: "Shopping" had been RENAMED to Esraa (and ATM / Cash to Fofo) → every mall purchase showed under Esraa.
+   Split them: Esraa becomes its own category, Shopping & ATM / Cash get their names back; explicit Esraa entries + trained merchants are kept. */
+function migrateEsraaSplit(){
+  const r=S.settings.catRename||{};
+  if(r.Shopping==='Esraa'||r['ATM / Cash']==='Fofo'){
+    delete r.Shopping; delete r['ATM / Cash']; S.settings.catRename=r;
+    S.settings.customCats=Array.from(new Set([...(S.settings.customCats||[]),'Esraa']));
+  }
+}
 function migrateUaeRate(){
   if(S.settings.uaeRate500) return;
   if(+S.settings.carRevUAE===850){
@@ -280,7 +289,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-11-car-otherexp';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-11-cat-rename-guard';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -1886,7 +1895,7 @@ async function syncCloud(opts){
     if(d.state && ((d.updatedAt||0) > (S.updatedAt||0) || localEmpty)){        // remote is newer → adopt
       S={...clone(DEFAULT),...d.state}; localStorage.setItem(LS,JSON.stringify(S));
       retitleOldSms();                                        // re-title merchants on the freshly-adopted data
-      migrateUaeRate(); migrateCatMemory();                  // re-apply one-time migrations to adopted data
+      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory();   // re-apply one-time migrations to adopted data
       render();
     }
     const ri=await fetch(base+'/inbox',{headers:cloudHeaders()});
@@ -2019,6 +2028,7 @@ function renameCatOpen(i){
 function renameCatSave(){
   const nn=(document.getElementById('renCat').value||'').trim(), old=_renCat;
   if(!nn)return toast('Enter a name'); if(nn===old)return openCatManager();
+  if(catList().some(c=>c!==old&&c.toLowerCase()===nn.toLowerCase()))return toast('“'+nn+'” already exists — pick another name (renaming onto it would merge the two)');
   const r=S.settings.catRename=S.settings.catRename||{};
   r[old]=nn;                                   // map this display name → new
   Object.keys(r).forEach(k=>{ if(r[k]===old) r[k]=nn; });   // rewire chained renames
@@ -2273,13 +2283,13 @@ function openExpMonth(mo){
     const groups={}; items.forEach(x=>{ const c=expenseCat(x); (groups[c]=groups[c]||[]).push(x); });
     const cats=Object.keys(groups).sort((a,b)=>sumQAR(groups[b])-sumQAR(groups[a]));
     body=cats.map(c=>`
-      <div class="kv" style="margin-top:8px;border-bottom:2px solid var(--line)"><span style="font-weight:700">${esc(c)}</span><span style="font-weight:700;color:var(--red)">${fmt(sumQAR(groups[c]),'QAR')}</span></div>
+      <div class="kv" style="margin-top:8px;border-bottom:2px solid var(--line)"><span style="font-weight:700">${esc(c)} <span class="s">· ${groups[c].length} item${groups[c].length!==1?'s':''}</span></span><span style="font-weight:700;color:var(--red)">${fmt(sumQAR(groups[c]),'QAR')}</span></div>
       ${expGroupList('cat:'+c,groups[c],byNew)}`).join('');
   } else if(_expView==='day'){
     const days={}; items.forEach(x=>{ const d=x.date||today(); (days[d]=days[d]||[]).push(x); });
     const ds=Object.keys(days).sort().reverse();
     body=ds.map(d=>`
-      <div class="kv" style="margin-top:8px;border-bottom:2px solid var(--line)"><span style="font-weight:700">${fmtDate(d)}</span><span style="font-weight:700;color:var(--red)">${fmt(sumQAR(days[d]),'QAR')}</span></div>
+      <div class="kv" style="margin-top:8px;border-bottom:2px solid var(--line)"><span style="font-weight:700">${fmtDate(d)} <span class="s">· ${days[d].length} item${days[d].length!==1?'s':''}</span></span><span style="font-weight:700;color:var(--red)">${fmt(sumQAR(days[d]),'QAR')}</span></div>
       ${expGroupList('day:'+d,days[d],byHigh)}`).join('');
   } else {
     body=`<div class="list" style="margin-top:6px">${items.slice().sort(_expView==='high'?byHigh:byNew).map(expItemRow).join('')}</div>`;
@@ -2450,6 +2460,7 @@ function retitleOldSms(){
 
 /* ---------------- INIT ---------------- */
 retitleOldSms();          // re-extract merchant name/time for existing bank-SMS entries (once)
+migrateEsraaSplit();      // Shopping↔Esraa rename split (once)
 migrateUaeRate();         // UAE default car revenue 850 → 500 (once)
 migrateCatMemory();       // re-key learned categories to the smarter merchant keys (once)
 runAutoSalary();          // add this month's salary automatically if due
