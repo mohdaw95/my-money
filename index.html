@@ -279,7 +279,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-08-insp-in-recv-sheet';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-11-editexp-stay';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -1765,7 +1765,8 @@ function saveEditTxn(id){
       title:label, sub:(x.edit.kind==='salary'?'Salary → ':'Income → ')+accName(acc)});
     x.edit={...x.edit,account:acc,detail:det};
   }
-  save(); closeSheet(); toast('Updated');
+  const back=_sheetBack;   // render() (inside save) clears it — keep it so we return to the page we came from
+  save(); _sheetBack=back; backToList(); toast('Updated');
 }
 
 /* ---------------- ASSETS BREAKDOWN ---------------- */
