@@ -289,7 +289,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-11-exp-compare';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-11-diff-networth';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -307,16 +307,38 @@ function accountsTotalQAR(){ let t=0; ACCTS.forEach(a=>{ t+=toQAR(S.accounts[a.k
 /* Qatar Prepaid card spending stops counting as an expense from this date on (older entries untouched) */
 const PREPAID_EXP_CUTOFF='2026-09-28';
 function isExp(x){ return x.dir<0 && !(x.edit && x.edit.account==='qPrepaid' && (x.date||'')>=PREPAID_EXP_CUTOFF); }
-function recordDailyBalance(){ try{ S.settings.balByDay=S.settings.balByDay||{}; S.settings.balByDay[today()]=Math.round(accountsTotalQAR()); }catch(e){} }
+function recordDailyBalance(){ try{ S.settings.balByDay=S.settings.balByDay||{}; S.settings.balByDay[today()]=Math.round(accountsTotalQAR()); S.settings.nwByDay=S.settings.nwByDay||{}; S.settings.nwByDay[today()]=Math.round(totals().net); }catch(e){} }
+/* net worth of any saved state (used to back-fill history from cloud backups) */
+function netWorthOf(st){
+  const s=st.settings||{}; const rate={QAR:1,JOD:+s.rateJODtoQAR||5.13,AED:+s.rateAEDtoQAR||0.99,USD:+s.rateUSDtoQAR||3.64,...(s.rates||{})};
+  const q=(a,c)=>(+a||0)*(rate[c]||1);
+  let acc=0; Object.entries(st.accounts||{}).forEach(([k,v])=>{ if(k!=='qPrepaid') acc+=q(v,k==='jDebit'?'JOD':'QAR'); });
+  const grams=(st.gold||[]).reduce((x,g)=>x+(+g.grams||0),0); const gold=q(grams*(+s.gold21kJOD||0),'JOD');
+  const cars=(st.cars||[]).filter(c=>c.status==='receivable'||(c.status==='inspection'&&!c.inspReceived)).reduce((x,c)=>x+q(c.amount,c.currency),0);
+  const recv=(st.pr||[]).filter(p=>p.type==='receivable').reduce((x,p)=>x+q(p.amount,p.currency),0);
+  const pay=(st.pr||[]).filter(p=>p.type==='payable').reduce((x,p)=>x+q(p.amount,p.currency),0);
+  return Math.round(acc+gold+cars+recv-pay);
+}
+/* one-time: back-fill net-worth history from the daily cloud backups (last 30 days) */
+async function seedNwHistory(){
+  if(S.settings.nwSeeded||!cloudBase()) return;
+  try{
+    const dates=((await (await fetch(cloudBase()+'/backups',{headers:cloudHeaders()})).json()).backups||[]);
+    const nw=S.settings.nwByDay||{};
+    for(const dt of dates){ if(nw[dt]!=null) continue; const b=await (await fetch(cloudBase()+'/backup?date='+dt,{headers:cloudHeaders()})).json(); if(b&&b.state) nw[dt]=netWorthOf(b.state); }
+    S.settings.nwByDay=nw; S.settings.nwSeeded=true; save();
+  }catch(e){}
+}
 /* change in total account balances across a month (first day → last day) */
 function monthBalanceDiff(mo){
-  const bd=S.settings.balByDay||{}; const dates=Object.keys(bd).sort(); if(!dates.length) return null;
+  const nw=S.settings.nwByDay||{}, useNw=Object.keys(nw).some(d=>d.slice(0,7)===mo);
+  const bd=useNw?nw:(S.settings.balByDay||{}); const dates=Object.keys(bd).sort(); if(!dates.length) return null;
   const inMo=dates.filter(d=>d.slice(0,7)===mo);
-  const closing = mo===curMonth() ? Math.round(accountsTotalQAR()) : (inMo.length?bd[inMo[inMo.length-1]]:null);
+  const closing = mo===curMonth() ? (useNw?Math.round(totals().net):Math.round(accountsTotalQAR())) : (inMo.length?bd[inMo[inMo.length-1]]:null);
   const before=dates.filter(d=>d < mo+'-01');
   const opening = before.length ? bd[before[before.length-1]] : (inMo.length?bd[inMo[0]]:null);
   if(closing==null||opening==null) return null;
-  return {opening,closing,diff:closing-opening};
+  return {opening,closing,diff:closing-opening,kind:useNw?'net worth':'accounts'};
 }
 function save(){ S.updatedAt=Date.now(); recordDailyBalance(); localStorage.setItem(LS, JSON.stringify(S)); render(); cloudPushSoon(); }
 /* home "Difference" card → change in total account balances, month by month */
@@ -326,8 +348,8 @@ function openDiffMonths(){
   const months=[...new Set(Object.keys(bd).map(d=>d.slice(0,7)))].sort().reverse();
   const rows=months.map(mo=>({mo,b:monthBalanceDiff(mo)})).filter(r=>r.b);
   openSheet(`
-   <h2>📉 Account difference by month</h2>
-   <p class="hint" style="margin-top:0">Change in your total account balances from the first day to the last day of each month.</p>
+   <h2>📉 Net worth difference by month</h2>
+   <p class="hint" style="margin-top:0">Change in your net worth from the first day to the last day of each month (older months without net-worth history show account balances instead).</p>
    <div class="list">${rows.length?rows.map(r=>`
      <div class="item"><div class="em">📅</div>
        <div class="mid"><div class="t">${monthLabel(r.mo)}${r.mo===curMonth()?' <span class="badge paid">this month</span>':''}</div>
@@ -422,7 +444,7 @@ function render(){
     <div class="acard tap" onclick="openDiffMonths()">
       <div class="ic">📉</div><div class="nm">Difference</div>
       ${(()=>{ const b=monthBalanceDiff(curMonth()); return b
-        ? `<div class="bal" style="color:${b.diff>=0?'var(--green)':'var(--red)'}">${b.diff>=0?'+':'−'}${fmt(Math.abs(b.diff),'QAR')}</div><div class="sub">${monthLabel(curMonth())} · accounts</div>`
+        ? `<div class="bal" style="color:${b.diff>=0?'var(--green)':'var(--red)'}">${b.diff>=0?'+':'−'}${fmt(Math.abs(b.diff),'QAR')}</div><div class="sub">${monthLabel(curMonth())} · ${b.kind}</div>`
         : `<div class="bal" style="color:var(--muted)">—</div><div class="sub">building history…</div>`; })()}
     </div>
     <div class="acard tap" onclick="openSavings()">
@@ -2325,7 +2347,7 @@ function openExpMonth(mo){
   openSheet(`
    <h2>🧾 ${monthLabel(mo)}</h2>
    <div class="kv"><span style="font-weight:800">Total spent${g.override?' <span class="badge">manual</span>':''}</span><span style="font-weight:800;color:var(--red)">${fmt(g.total,'QAR')}</span></div>
-   ${(()=>{ const b=monthBalanceDiff(mo); return b?`<div class="kv"><span style="font-weight:700">Difference (accounts)</span><span style="font-weight:700;color:${b.diff>=0?'var(--green)':'var(--red)'}">${b.diff>=0?'+':'−'}${fmt(Math.abs(b.diff),'QAR')}</span></div><p class="hint" style="margin-top:2px">Total balance ${fmt(b.opening,'QAR')} (start) → ${fmt(b.closing,'QAR')} (${mo===curMonth()?'now':'end'})</p>`:''; })()}
+   ${(()=>{ const b=monthBalanceDiff(mo); return b?`<div class="kv"><span style="font-weight:700">Difference (${b.kind})</span><span style="font-weight:700;color:${b.diff>=0?'var(--green)':'var(--red)'}">${b.diff>=0?'+':'−'}${fmt(Math.abs(b.diff),'QAR')}</span></div><p class="hint" style="margin-top:2px">${b.kind=='net worth'?'Net worth':'Total balance'} ${fmt(b.opening,'QAR')} (start) → ${fmt(b.closing,'QAR')} (${mo===curMonth()?'now':'end'})</p>`:''; })()}
    ${expCompareHtml(mo)}
    <label class="f">✎ Set month total manually (QAR)</label>
    <input id="expOv" type="text" inputmode="decimal" value="${(S.settings.expOverride||{})[mo]!=null?(S.settings.expOverride||{})[mo]:''}" placeholder="leave blank to auto-total">
@@ -2497,6 +2519,7 @@ render();
 refreshFX();              // silent live FX on open
 syncCloud();              // pull cloud state + bank-SMS inbox on open (if connected)
 checkUpdate();            // auto-load a newer deployed version if one is live
+setTimeout(seedNwHistory,2500);   // back-fill net-worth history from cloud backups (once)
 // Auto gold refresh once per day
 (function(){ const last=S.settings.goldUpdated||0; if(Date.now()-last>20*60*60*1000){ /* attempt quietly */
   fetch('https://api.gold-api.com/price/XAU').then(r=>r.json()).then(j=>{ if(j&&j.price){
