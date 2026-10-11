@@ -297,7 +297,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-11-carrev-dtd';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-11-nw-vs-lastmonth';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -398,7 +398,13 @@ function totals(){
 function render(){
   _sheetBack=null;   // on the home screen, a message popup's Close returns home
   const t=totals();
-  document.getElementById('netWorth').innerHTML = 'QAR '+Math.round(t.net).toLocaleString('en');
+  { // net worth + change vs the same day last month (from the daily net-worth history)
+    const nw=S.settings.nwByDay||{}; const target=monthShift(curMonth(),-1)+'-'+today().slice(8,10);
+    const dates=Object.keys(nw).filter(d=>d<=target&&d>=monthShift(curMonth(),-1)+'-01').sort(); const ref=dates.length?dates[dates.length-1]:null;
+    let line='';
+    if(ref){ const diff=Math.round(t.net)-nw[ref]; const col=diff>0?'var(--green)':(diff<0?'var(--red)':'var(--muted)');
+      line=`<div style="font-size:13px;font-weight:600;color:${col};margin-top:2px">${diff>0?'▲ +':(diff<0?'▼ −':'= ')}${fmt(Math.abs(diff),'QAR')} <span style="color:var(--muted);font-weight:500">vs ${fmtDate(ref)}</span></div>`; }
+    document.getElementById('netWorth').innerHTML = 'QAR '+Math.round(t.net).toLocaleString('en')+line; }
 
   // backup reminder banner removed (cloud auto-backs up daily); keep the element empty
   document.getElementById('backupBanner').innerHTML = '';
