@@ -126,6 +126,8 @@
   .kv:last-child{border:none} .kv span:last-child{font-weight:700}
   .del{color:var(--red);background:transparent;font-size:13px;font-weight:700;padding:6px 0}
   .chiprow{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;margin-bottom:4px}
+  .chiprow button{flex:none;padding:8px 12px;border-radius:999px;background:var(--card);border:1px solid var(--line);color:var(--text);font-weight:600;font-size:13px}
+  .chiprow button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
   .chip{white-space:nowrap;background:var(--card);border:1px solid var(--line);color:var(--muted);border-radius:20px;padding:7px 13px;font-size:12px;font-weight:600}
   .chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
   .toast{position:fixed;bottom:calc(20px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:#0b1626;border:1px solid var(--line);color:var(--text);padding:12px 18px;border-radius:14px;font-size:14px;z-index:60;box-shadow:0 8px 24px rgba(0,0,0,.4);opacity:0;transition:opacity .2s;pointer-events:none}
@@ -200,9 +202,9 @@
 const LS='myMoney_v1';
 /* the three bank cards */
 const ACCTS=[
-  {key:'qDebit',   name:'Qatar Debit',        ic:'🏦', cur:'QAR', sub:'Qatar · Debit'},
-  {key:'qCredit',  name:'Qatar Credit Card',  ic:'💳', cur:'QAR', sub:'Qatar · Credit card'},
-  {key:'qPrepaid', name:'Qatar Prepaid Card', ic:'🎫', cur:'QAR', sub:'Qatar · Prepaid'},
+  {key:'qDebit',   name:'Qatar Debit',        ic:'🇶🇦', cur:'QAR', sub:'Qatar · Debit'},
+  {key:'qCredit',  name:'Qatar Credit Card',  ic:'🇶🇦', cur:'QAR', sub:'Qatar · Credit card'},
+  {key:'qPrepaid', name:'Qatar Prepaid Card', ic:'🇶🇦', cur:'QAR', sub:'Qatar · Prepaid'},
   {key:'jDebit',   name:'Jordan Debit',       ic:'🇯🇴', cur:'JOD', sub:'Jordan · Debit'},
   {key:'cash',     name:'Cash',               ic:'💵', cur:'QAR', sub:'Cash on hand'},
 ];
@@ -289,7 +291,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-11-diff-networth';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-11-avgday-card';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -446,6 +448,11 @@ function render(){
       ${(()=>{ const b=monthBalanceDiff(curMonth()); return b
         ? `<div class="bal" style="color:${b.diff>=0?'var(--green)':'var(--red)'}">${b.diff>=0?'+':'−'}${fmt(Math.abs(b.diff),'QAR')}</div><div class="sub">${monthLabel(curMonth())} · ${b.kind}</div>`
         : `<div class="bal" style="color:var(--muted)">—</div><div class="sub">building history…</div>`; })()}
+    </div>
+    <div class="acard tap" onclick="openAvgDay()">
+      <div class="ic">📆</div><div class="nm">Avg exp / day</div>
+      ${(()=>{ const cur=curMonth(), day=Math.max(1,+today().slice(8,10)); const a=expStats(cur,day), b=expStats(monthShift(cur,-1),daysInMonth(monthShift(cur,-1))); const d=b.avg>0?Math.round((a.avg-b.avg)/b.avg*100):null;
+        return `<div class="bal" style="color:var(--red)">${fmt(a.avg,'QAR')}</div><div class="sub">${d==null?monthLabel(cur):`<span style="color:${d>0?'var(--red)':'var(--green)'}">${d>0?'▲':'▼'} ${Math.abs(d)}%</span> vs last month`}</div>`; })()}
     </div>
     <div class="acard tap" onclick="openSavings()">
       <div class="ic">🐖</div><div class="nm">Savings this month</div>
@@ -2224,12 +2231,18 @@ function expByMonth(){
 /* month comparison: avg per day + spend up to the same day, this month vs the previous two */
 function monthShift(mo,k){ const p=mo.split('-'); const d=new Date(+p[0],+p[1]-1+k,1); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
 function daysInMonth(mo){ const p=mo.split('-'); return new Date(+p[0],+p[1],0).getDate(); }
+/* fixed monthly items (rent, the monthly CliQ transfer…) are left out of the per-day numbers */
+function avgExcl(){ const d=S.settings.avgExclude||{}; return {cats:(d.cats||['Rent']).map(c=>c.toLowerCase()), words:(d.words||['كليك','cliq']).map(w=>w.toLowerCase())}; }
+function isFixedMonthly(x){ const e=avgExcl(); const c=(expenseCat(x)||'').toLowerCase(); if(e.cats.includes(c)) return true; const t=((x.title||'')+' '+(smsSource(x)||'')).toLowerCase(); return e.words.some(w=>w&&t.includes(w)); }
 function expStats(mo,dayCap){
   const items=S.txns.filter(x=>isExp(x)&&(x.date||'').slice(0,7)===mo);
   const g=expByMonth()[mo]; const total=g?g.total:0;
   const isCur=mo===curMonth(); const days=isCur?Math.max(1,+today().slice(8,10)):daysInMonth(mo);
-  const dtd=items.filter(x=>+(x.date||'').slice(8,10)<=dayCap).reduce((s,x)=>s+toQAR(x.amount,x.currency),0);
-  return {total,days,avg:total/days,dtd};
+  const daily=items.filter(x=>!isFixedMonthly(x));
+  const excluded=items.filter(isFixedMonthly).reduce((s,x)=>s+toQAR(x.amount,x.currency),0);
+  const dailyTot=daily.reduce((s,x)=>s+toQAR(x.amount,x.currency),0);
+  const dtd=daily.filter(x=>+(x.date||'').slice(8,10)<=dayCap).reduce((s,x)=>s+toQAR(x.amount,x.currency),0);
+  return {total,days,avg:dailyTot/days,dtd,excluded};
 }
 function expCompareHtml(mo){
   const dayCap = mo===curMonth() ? Math.max(1,+today().slice(8,10)) : daysInMonth(mo);
@@ -2242,8 +2255,22 @@ function expCompareHtml(mo){
    ${row('Avg / day',s=>s.avg)}
    ${row('Up to day '+dayCap,s=>s.dtd)}
    ${row('Month total',s=>s.total)}
-   <p class="hint" style="margin-top:2px">▲▼ = change vs the month before it. "Up to day ${dayCap}" compares the same number of days in each month.</p>
+   ${row('Fixed (rent/CliQ) — not in avg',s=>s.excluded)}
+   <p class="hint" style="margin-top:2px">▲▼ = change vs the month before it. Avg/day and "Up to day ${dayCap}" leave out rent and the monthly CliQ transfer; Month total includes everything.</p>
   </div>`;
+}
+let _avgMo=null;
+function openAvgDay(mo){
+  mo=mo||_avgMo||curMonth(); _avgMo=mo; _sheetBack=()=>openAvgDay(mo);
+  const months=[...new Set(S.txns.filter(isExp).map(x=>(x.date||'').slice(0,7)))].filter(Boolean).sort().reverse().slice(0,12);
+  if(!months.includes(curMonth())) months.unshift(curMonth());
+  const e=avgExcl();
+  openSheet(`
+   <h2>📆 Avg expense per day</h2>
+   <div class="chiprow">${months.map(m=>`<button class="${m===mo?'on':''}" onclick="openAvgDay('${m}')" style="white-space:nowrap">${monthLabel(m).replace(' 20',' ’')}</button>`).join('')}</div>
+   ${expCompareHtml(mo)}
+   <p class="hint">Left out of avg/day: category <b>${esc(e.cats.join(', '))}</b> and anything containing <b>${esc(e.words.join(' / '))}</b>.</p>
+  `);
 }
 function openExpMonths(){
   _expSel=false; _expSelIds=new Set(); _expExpanded=new Set();
@@ -2252,7 +2279,6 @@ function openExpMonths(){
   openSheet(`
    <h2>🧾 Expenses by month</h2>
    <div class="kv"><span style="font-weight:800">All-time spent</span><span style="font-weight:800;color:var(--red)">${fmt(grand,'QAR')}</span></div>
-   ${expCompareHtml(curMonth())}
    <label class="f" style="margin-top:6px">Pick a month → per day / per category</label>
    <div class="list" style="margin-top:6px">${months.length? months.map(mo=>`
      <div class="item tap" onclick="openExpMonth('${mo}')"><div class="em">📅</div>
@@ -2348,7 +2374,6 @@ function openExpMonth(mo){
    <h2>🧾 ${monthLabel(mo)}</h2>
    <div class="kv"><span style="font-weight:800">Total spent${g.override?' <span class="badge">manual</span>':''}</span><span style="font-weight:800;color:var(--red)">${fmt(g.total,'QAR')}</span></div>
    ${(()=>{ const b=monthBalanceDiff(mo); return b?`<div class="kv"><span style="font-weight:700">Difference (${b.kind})</span><span style="font-weight:700;color:${b.diff>=0?'var(--green)':'var(--red)'}">${b.diff>=0?'+':'−'}${fmt(Math.abs(b.diff),'QAR')}</span></div><p class="hint" style="margin-top:2px">${b.kind=='net worth'?'Net worth':'Total balance'} ${fmt(b.opening,'QAR')} (start) → ${fmt(b.closing,'QAR')} (${mo===curMonth()?'now':'end'})</p>`:''; })()}
-   ${expCompareHtml(mo)}
    <label class="f">✎ Set month total manually (QAR)</label>
    <input id="expOv" type="text" inputmode="decimal" value="${(S.settings.expOverride||{})[mo]!=null?(S.settings.expOverride||{})[mo]:''}" placeholder="leave blank to auto-total">
    <button class="btn" style="margin-top:8px" onclick="saveMonthOverride('expOverride','${mo}','expOv',openExpMonth)">Save total</button>
