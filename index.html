@@ -289,7 +289,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-11-cat-rename-guard';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-11-cat-stable';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -1748,7 +1748,7 @@ function editTxn(id){
    <label class="f">Amount</label>
    <div class="amtrow"><input id="etAmt" type="text" inputmode="decimal" value="${x.amount}"><select id="etCur">${curOptions(x.currency)}</select></div>
    ${x.edit.kind==='expense'
-     ? `<label class="f">Category</label><select id="etCat">${catOptions(x.cat||expenseCat(x))}</select>`
+     ? `<label class="f">Category</label><select id="etCat">${catOptions(expenseCat(x))}</select>`
      : `<label class="f">Into account</label><select id="etAcc">${accountOptions(x.edit.account)}</select>`}
    <label class="f">Detail</label><input id="etDet" value="${esc(x.edit.detail||'')}">
    <label class="f">Date</label><input type="date" id="etDate" value="${x.date}">
@@ -2101,7 +2101,7 @@ function applyInboxItem(it){
       log('📩',det,'Bank SMS → '+accName(acc)+fx,amount,cur,1,date,null,{kind:'income',account:acc,detail:det});
     }else{
       log('📩',det,'Bank SMS · '+accName(acc)+fx,amount,cur,-1,date,null,{kind:'expense',account:acc,detail:det});
-      S.txns[S.txns.length-1].cat=it.category||categorize(it.raw||det);
+      { const nx=S.txns[S.txns.length-1]; const mk=merchantKey(nx); nx.cat=it.category||(S.settings.catMemory||{})[mk]||categorize(it.raw||det); }   // learned merchant wins for NEW entries
     }
     const x=S.txns[S.txns.length-1]; x.time=time; x.raw=it.raw;   // merchant time + keep full message
   }
@@ -2161,8 +2161,9 @@ function expenseCat(x){
   if(x.catEdited && x.cat) return remapCat(x.cat);              // user set it manually on this entry → keep it
   // Thailand (THB / baht) spending → always Travel
   if(/\bthb\b|\bbaht\b|thailand|bangkok|phuket|pattaya/i.test((smsSource(x)||'')+' '+(x.title||''))) return remapCat('Travel');
+  if(x.cat && x.cat!=='General' && x.cat!=='Bank SMS') return remapCat(x.cat);   // entry keeps the category it was given (at creation or by an edit)
   const mem=S.settings.catMemory||{}, k=merchantKey(x);
-  if(k && mem[k]) return remapCat(mem[k]);                       // learned from a past correction for this merchant
+  if(k && mem[k]) return remapCat(mem[k]);                       // learned merchant → used for entries that have no category yet
   // auto: match the MERCHANT name first (most reliable), then fall back to the whole message
   const name=displayTitle(x)||x.title||'';
   let c=categorize(name);
