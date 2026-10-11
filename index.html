@@ -232,7 +232,8 @@ function migrateUaeRate(){
   S.settings.uaeRate500=true;
 }
 function carRate(country){ return country==='UAE' ? (+S.settings.carRevUAE||0) : (+S.settings.carRevQatar||0); }
-function carRev(c){ if(c.rev!=null && c.rev!=='') return +c.rev||0; if(c.commission!=null && c.commission!=='') return +c.commission||0; return carRate(c.country); }
+function carRevGross(c){ if(c.rev!=null && c.rev!=='') return +c.rev||0; if(c.commission!=null && c.commission!=='') return +c.commission||0; return carRate(c.country); }
+function carRev(c){ return carRevGross(c) - (+c.otherExp||0); }   // "Other exp" reduces car revenue only, not the receivable
 function carRevByMonth(){
   const m={};
   const slot=mo=>{ if(!m[mo])m[mo]={total:0,count:0,cars:[],entries:[]}; return m[mo]; };
@@ -279,7 +280,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-11-editexp-stay';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-11-car-otherexp';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -836,6 +837,7 @@ function carFormFields(c){
   const d=carDefaults(country);
   const v=(f)=> (c[f]!=null && c[f]!=='') ? c[f] : d[f];
   return `
+   <label class="f">Other exp (QAR) · deducted from car revenue only</label><input id="carOther" type="text" inputmode="decimal" value="${c.otherExp!=null&&c.otherExp!==''?c.otherExp:''}" placeholder="not added to receivable">
    <label class="f">Buying price (QAR) · reference only</label><input id="carBuy" type="text" inputmode="decimal" value="${c.buyPrice!=null&&c.buyPrice!==''?c.buyPrice:''}" placeholder="not counted in any total">
    <label class="f">Commission (QAR)</label><input id="carComm" type="text" inputmode="decimal" value="${v('commission')}" oninput="carRecvPreview()">
    <div id="carQatarOnly" class="${country==='Qatar'?'':'hide'}">
@@ -960,7 +962,8 @@ function saveCar(){
   }
   const deal=window._carDeal||'done';
   const buy=num((document.getElementById('carBuy')||{}).value)||0;   // reference only, not in amount
-  const c={id:uid(),amount,currency:'QAR',country,status:'receivable',detail:det,date,commission:comm,deposit:dep,inspection:insp,transfer:trans,deal,buyPrice:buy};
+  const other=num((document.getElementById('carOther')||{}).value)||0;   // revenue-only cost
+  const c={id:uid(),amount,currency:'QAR',country,status:'receivable',detail:det,date,commission:comm,deposit:dep,inspection:insp,transfer:trans,deal,buyPrice:buy,otherExp:other};
   if(sellerId) c.sellerId=sellerId;
   S.cars.push(c); carTxnSync(c);
   // a new car's inspection fee is money you owe → auto-add to "I owe" (only on ADD, never on edit)
@@ -1139,7 +1142,8 @@ function saveEditCar(id){
   }
   const sellerId=(document.getElementById('carSeller')||{}).value||'';
   const buy=num((document.getElementById('carBuy')||{}).value)||0;
-  Object.assign(c,{amount,currency:'QAR',detail:det,date,country:window._carC,commission:comm,deposit:dep,inspection:insp,transfer:trans,deal:window._carDeal||'done',buyPrice:buy});
+  const other=num((document.getElementById('carOther')||{}).value)||0;
+  Object.assign(c,{amount,currency:'QAR',detail:det,date,country:window._carC,commission:comm,deposit:dep,inspection:insp,transfer:trans,deal:window._carDeal||'done',buyPrice:buy,otherExp:other});
   if(sellerId) c.sellerId=sellerId; else delete c.sellerId;
   carTxnSync(c);                               // keep the linked activity note in sync
   save(); closeSheet(); render(); toast('Updated');
