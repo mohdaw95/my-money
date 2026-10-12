@@ -297,7 +297,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-11-no-analysis';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-12-recurring';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -722,6 +722,49 @@ function addSalaryOnce(){
   save(); closeSheet(); toast('Salary added once');
 }
 /* auto-add salary for the current month if due and not yet paid. force=ignore the day check. */
+/* ---- fixed monthly expenses (added automatically on the 1st, as plain expenses; user nets things manually) ---- */
+const RECURRING_START='2026-10';
+function seedRecurring(){
+  if(S.settings.recurringSeeded) return;
+  S.settings.recurring=S.settings.recurring||[];
+  const has=id=>S.settings.recurring.some(r=>r.id===id);
+  if(!has('esraa')) S.settings.recurring.push({id:'esraa',name:'Esraa allowance',amount:1500,currency:'QAR',cat:'Esraa'});
+  if(!has('joloan')) S.settings.recurring.push({id:'joloan',name:'Jordan loan',amount:110,currency:'JOD',cat:'Loan'});
+  S.settings.customCats=Array.from(new Set([...(S.settings.customCats||[]),'Esraa','Loan']));
+  (S.txns||[]).forEach(x=>{ if(x.dir<0 && /jordan loan/i.test(x.title||'')){ x.cat='Loan'; x.catEdited=true; x.fixed=true; } });   // the one logged in Sept
+  S.settings.recurringSeeded=true;
+}
+function runAutoRecurring(){
+  const mo=curMonth(); if(mo<RECURRING_START) return false;
+  S.settings.recurringDone=S.settings.recurringDone||{}; const done=S.settings.recurringDone[mo]=S.settings.recurringDone[mo]||{};
+  let added=0;
+  (S.settings.recurring||[]).forEach(r=>{ if(done[r.id]) return;
+    S.txns.push({id:uid(),emoji:'🔁',title:r.name,sub:'Fixed monthly · '+monthLabel(mo),amount:+r.amount||0,currency:r.currency||'QAR',dir:-1,date:mo+'-01',time:'',effects:null,edit:{kind:'expense',account:'',detail:r.name},cat:r.cat||'Other',catEdited:true,fixed:true});
+    done[r.id]=true; added++; });
+  if(added){ localStorage.setItem(LS,JSON.stringify(S)); }
+  return added;
+}
+function openRecurring(){
+  _sheetBack=openRecurring; const list=S.settings.recurring||[];
+  openSheet(`
+   <h2>🔁 Fixed monthly expenses</h2>
+   <p class="hint" style="margin-top:0">Added automatically on the 1st of every month as expenses (from ${monthLabel(RECURRING_START)}). Not included in “Avg exp / day”.</p>
+   <div class="list">${list.length?list.map((r,i)=>`<div class="item"><div class="em">🔁</div><div class="mid"><div class="t">${esc(r.name)}</div><div class="s">${esc(r.cat||'')} · monthly</div></div><div class="amt neg" style="flex:none">${fmt(+r.amount||0,r.currency||'QAR')}</div><button class="del" style="margin-left:8px" onclick="delRecurring(${i})">✕</button></div>`).join(''):'<div class="empty">None yet.</div>'}</div>
+   <label class="f" style="margin-top:12px">Add one</label>
+   <input id="rcName" placeholder="Name (e.g. Car insurance)">
+   <div class="amtrow" style="margin-top:8px"><input id="rcAmt" type="text" inputmode="decimal" placeholder="Amount"><select id="rcCur">${curOptions('QAR')}</select></div>
+   <label class="f">Category</label><select id="rcCat">${catOptions('Other')}</select>
+   <button class="btn" onclick="addRecurring()">＋ Add fixed expense</button>
+   <button class="btn ghost" onclick="openSettings()">← Settings</button>
+  `);
+}
+function addRecurring(){
+  const name=(document.getElementById('rcName').value||'').trim(), amt=num(document.getElementById('rcAmt').value);
+  if(!name||!(amt>0)) return toast('Enter a name and amount');
+  S.settings.recurring=S.settings.recurring||[]; S.settings.recurring.push({id:uid(),name,amount:amt,currency:document.getElementById('rcCur').value,cat:document.getElementById('rcCat').value});
+  runAutoRecurring(); save(); openRecurring(); toast('Added — this month\'s entry logged');
+}
+function delRecurring(i){ (S.settings.recurring||[]).splice(i,1); save(); openRecurring(); toast('Removed (future months only)'); }
 function runAutoSalary(force){
   const s=S.salary; if(!s)return false;
   if(s.lastPaid===curMonth())return false;                 // already paid this month
@@ -1857,6 +1900,7 @@ function openSettings(){
    <label class="f">1 gold lira = ? grams</label><input id="stLira" type="number" step="0.01" value="${S.settings.liraGrams}">
    <button class="btn" onclick="saveSettings()">Save settings</button>
    <button class="btn ghost" onclick="refreshFX().then(()=>{openSettings();toast('Rates refreshed')})">↻ Refresh live FX</button>
+   <button class="btn ghost" onclick="openRecurring()">🔁 Fixed monthly expenses</button>
    <button class="btn ghost" onclick="openCloud()">☁️ Cloud sync ${cloudBase()?'· on':''}</button>
    <button class="btn ghost" onclick="openBackup()">💾 Backup &amp; restore</button>
   `);
@@ -1940,7 +1984,7 @@ async function syncCloud(opts){
     if(d.state && ((d.updatedAt||0) > (S.updatedAt||0) || localEmpty)){        // remote is newer → adopt
       S={...clone(DEFAULT),...d.state}; localStorage.setItem(LS,JSON.stringify(S));
       retitleOldSms();                                        // re-title merchants on the freshly-adopted data
-      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory();   // re-apply one-time migrations to adopted data
+      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); runAutoRecurring();   // re-apply one-time migrations to adopted data
       render();
     }
     const ri=await fetch(base+'/inbox',{headers:cloudHeaders()});
@@ -2249,7 +2293,7 @@ function monthShift(mo,k){ const p=mo.split('-'); const d=new Date(+p[0],+p[1]-1
 function daysInMonth(mo){ const p=mo.split('-'); return new Date(+p[0],+p[1],0).getDate(); }
 /* fixed monthly items (rent, the monthly CliQ transfer…) are left out of the per-day numbers */
 function avgExcl(){ const d=S.settings.avgExclude||{}; return {cats:(d.cats||['Rent']).map(c=>c.toLowerCase()), words:(d.words||['كليك','cliq']).map(w=>w.toLowerCase())}; }
-function isFixedMonthly(x){ const e=avgExcl(); const c=(expenseCat(x)||'').toLowerCase(); if(e.cats.includes(c)) return true; const t=((x.title||'')+' '+(smsSource(x)||'')).toLowerCase(); return e.words.some(w=>w&&t.includes(w)); }
+function isFixedMonthly(x){ if(x.fixed) return true; const e=avgExcl(); const c=(expenseCat(x)||'').toLowerCase(); if(e.cats.includes(c)) return true; const t=((x.title||'')+' '+(smsSource(x)||'')).toLowerCase(); return e.words.some(w=>w&&t.includes(w)); }
 function expStats(mo,dayCap){
   const items=S.txns.filter(x=>isExp(x)&&(x.date||'').slice(0,7)===mo);
   const g=expByMonth()[mo]; const total=g?g.total:0;
@@ -2591,6 +2635,7 @@ migrateEsraaSplit();      // Shopping↔Esraa rename split (once)
 migrateUaeRate();         // UAE default car revenue 850 → 500 (once)
 migrateCatMemory();       // re-key learned categories to the smarter merchant keys (once)
 runAutoSalary();          // add this month's salary automatically if due
+seedRecurring(); runAutoRecurring();   // fixed monthly expenses (Esraa allowance, Jordan loan, …)
 recordDailyBalance();     // snapshot today's total balance for the monthly Difference field
 render();
 refreshFX();              // silent live FX on open
