@@ -297,7 +297,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-12-fixed-avg-card';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-12-marafeq';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -735,7 +735,7 @@ function isFixedItem(x){
   const t=((x.title||'')+' '+(x.raw||'')).toLowerCase(), amt=toQAR(x.amount||0,x.currency||'QAR');
   if(amt>=1000 && (x.cat==='Rent'||x.cat===FIXED_CAT||/cheque|rent|إيجار|ايجار/.test(t))) return true;   // the rent cheque (QNB "A cheque was debited")
   if(/كليك|cliq/.test(t) && /mufeed/.test(t)) return true;                       // monthly CliQ to Mufeed
-  if(/jordan loan|loan jo|esraa allowance|kahramaa|كهرماء|vodafone/.test(t)) return true;
+  if(/jordan loan|loan jo|esraa allowance|kahramaa|كهرماء|vodafone|marafeq|مرافق|lusail city district|district c|qatar ?cool/.test(t)) return true;   // + Marafeq AC (district cooling) bill
   return false;
 }
 /* one-time: create the 'ثابت كل شهر' category and move past fixed items into it (amounts untouched); tiny bank-fee debits leave Rent */
@@ -748,7 +748,7 @@ function migrateFixedCat(){
   });
   const mem=S.settings.catMemory=S.settings.catMemory||{};
   Object.keys(mem).forEach(k=>{ if(mem[k]==='Rent') delete mem[k]; });
-  ['vodafone','jordan loan','loan jo','esraa allowance','kahramaa'].forEach(k=>mem[k]=FIXED_CAT);
+  ['vodafone','jordan loan','loan jo','esraa allowance','kahramaa','lusail city district c','marafeq'].forEach(k=>mem[k]=FIXED_CAT);
   (S.settings.recurring||[]).forEach(r=>r.cat=FIXED_CAT);
   S.settings.avgExclude={cats:[FIXED_CAT,'Rent'],words:[]};   // avg/day leaves out the whole fixed category (CliQ now lives there)
   S.settings.fixedCatV1=true;
