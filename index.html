@@ -297,7 +297,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-12-projection';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-10-12-fixed-avg-card';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -462,6 +462,10 @@ function render(){
       <div class="ic">🐖</div><div class="nm">Savings this month</div>
       <div class="bal" style="color:${cmSavings>=0?'var(--green)':'var(--red)'}">${fmt(cmSavings,'QAR')}</div>
       <div class="sub">salary + car rev − exp</div>
+    </div>
+    <div class="acard tap" onclick="openFixedMonths()">
+      <div class="ic">📌</div><div class="nm">Monthly fixed avg</div>
+      ${(()=>{ const a=fixedAvg(); return `<div class="bal" style="color:var(--red)">${fmt(a.avg,'QAR')}</div><div class="sub">this month ${fmt(a.thisMonth,'QAR')} · ${a.months} past month${a.months!==1?'s':''}</div>`; })()}
     </div>
     <div class="acard tap" onclick="openAvgDay()">
       <div class="ic">📆</div><div class="nm">Avg exp / day</div>
@@ -725,14 +729,38 @@ function addSalaryOnce(){
 /* auto-add salary for the current month if due and not yet paid. force=ignore the day check. */
 /* ---- fixed monthly expenses (added automatically on the 1st, as plain expenses; user nets things manually) ---- */
 const RECURRING_START='2026-10';
+const FIXED_CAT='ثابت كل شهر';
+/* is this entry one of the fixed monthly items? (rent cheque, monthly CliQ to Mufeed, loan, Esraa allowance, Kahramaa, Esraa's Vodafone line) */
+function isFixedItem(x){
+  const t=((x.title||'')+' '+(x.raw||'')).toLowerCase(), amt=toQAR(x.amount||0,x.currency||'QAR');
+  if(amt>=1000 && (x.cat==='Rent'||x.cat===FIXED_CAT||/cheque|rent|إيجار|ايجار/.test(t))) return true;   // the rent cheque (QNB "A cheque was debited")
+  if(/كليك|cliq/.test(t) && /mufeed/.test(t)) return true;                       // monthly CliQ to Mufeed
+  if(/jordan loan|loan jo|esraa allowance|kahramaa|كهرماء|vodafone/.test(t)) return true;
+  return false;
+}
+/* one-time: create the 'ثابت كل شهر' category and move past fixed items into it (amounts untouched); tiny bank-fee debits leave Rent */
+function migrateFixedCat(){
+  if(S.settings.fixedCatV1) return;
+  S.settings.customCats=Array.from(new Set([...(S.settings.customCats||[]),FIXED_CAT]));
+  (S.txns||[]).forEach(x=>{ if(x.dir>=0) return;
+    if(isFixedItem(x)){ x.cat=FIXED_CAT; x.catEdited=true; x.fixed=true; }
+    else if(x.cat==='Rent' && toQAR(x.amount||0,x.currency||'QAR')<1000){ x.cat='Bills'; x.catEdited=true; }   // bank fees mis-learned as rent
+  });
+  const mem=S.settings.catMemory=S.settings.catMemory||{};
+  Object.keys(mem).forEach(k=>{ if(mem[k]==='Rent') delete mem[k]; });
+  ['vodafone','jordan loan','loan jo','esraa allowance','kahramaa'].forEach(k=>mem[k]=FIXED_CAT);
+  (S.settings.recurring||[]).forEach(r=>r.cat=FIXED_CAT);
+  S.settings.avgExclude={cats:[FIXED_CAT,'Rent'],words:[]};   // avg/day leaves out the whole fixed category (CliQ now lives there)
+  S.settings.fixedCatV1=true;
+}
 function seedRecurring(){
   if(S.settings.recurringSeeded) return;
   S.settings.recurring=S.settings.recurring||[];
   const has=id=>S.settings.recurring.some(r=>r.id===id);
-  if(!has('esraa')) S.settings.recurring.push({id:'esraa',name:'Esraa allowance',amount:1500,currency:'QAR',cat:'Esraa'});
-  if(!has('joloan')) S.settings.recurring.push({id:'joloan',name:'Jordan loan',amount:110,currency:'JOD',cat:'Loan'});
-  S.settings.customCats=Array.from(new Set([...(S.settings.customCats||[]),'Esraa','Loan']));
-  (S.txns||[]).forEach(x=>{ if(x.dir<0 && /jordan loan/i.test(x.title||'')){ x.cat='Loan'; x.catEdited=true; x.fixed=true; } });   // the one logged in Sept
+  if(!has('esraa')) S.settings.recurring.push({id:'esraa',name:'Esraa allowance',amount:1500,currency:'QAR',cat:FIXED_CAT});
+  if(!has('joloan')) S.settings.recurring.push({id:'joloan',name:'Jordan loan',amount:110,currency:'JOD',cat:FIXED_CAT});
+  S.settings.customCats=Array.from(new Set([...(S.settings.customCats||[]),'Esraa',FIXED_CAT]));
+  (S.txns||[]).forEach(x=>{ if(x.dir<0 && /jordan loan/i.test(x.title||'')){ x.cat=FIXED_CAT; x.catEdited=true; x.fixed=true; } });   // the one logged in Sept
   S.settings.recurringSeeded=true;
 }
 function runAutoRecurring(){
@@ -1985,7 +2013,7 @@ async function syncCloud(opts){
     if(d.state && ((d.updatedAt||0) > (S.updatedAt||0) || localEmpty)){        // remote is newer → adopt
       S={...clone(DEFAULT),...d.state}; localStorage.setItem(LS,JSON.stringify(S));
       retitleOldSms();                                        // re-title merchants on the freshly-adopted data
-      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); runAutoRecurring();   // re-apply one-time migrations to adopted data
+      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); migrateFixedCat(); runAutoRecurring();   // re-apply one-time migrations to adopted data
       render();
     }
     const ri=await fetch(base+'/inbox',{headers:cloudHeaders()});
@@ -2191,7 +2219,7 @@ function applyInboxItem(it){
       log('📩',det,'Bank SMS → '+accName(acc)+fx,amount,cur,1,date,null,{kind:'income',account:acc,detail:det});
     }else{
       log('📩',det,'Bank SMS · '+accName(acc)+fx,amount,cur,-1,date,null,{kind:'expense',account:acc,detail:det});
-      { const nx=S.txns[S.txns.length-1]; const mk=merchantKey(nx); nx.cat=it.category||(S.settings.catMemory||{})[mk]||categorize(it.raw||det); }   // learned merchant wins for NEW entries
+      { const nx=S.txns[S.txns.length-1]; const mk=merchantKey(nx); nx.cat=it.category||(isFixedItem(nx)?FIXED_CAT:null)||(S.settings.catMemory||{})[mk]||categorize(it.raw||det); if(nx.cat===FIXED_CAT) nx.fixed=true; }   // learned merchant wins for NEW entries
     }
     const x=S.txns[S.txns.length-1]; x.time=time; x.raw=it.raw;   // merchant time + keep full message
   }
@@ -2354,6 +2382,18 @@ function openUpToDay(mo,dayCap){
    <p class="hint">Rent / monthly CliQ not included (same as the avg/day numbers).</p>
    <button class="btn ghost" onclick="openAvgDay('${_avgMo||curMonth()}')">← Back</button>
   `, ()=>openAvgDay(_avgMo||curMonth()));
+}
+/* fixed-monthly totals per month + average */
+function fixedByMonth(){ const m={}; S.txns.filter(x=>isExp(x)&&expenseCat(x)===FIXED_CAT).forEach(x=>{ const mo=(x.date||'').slice(0,7); m[mo]=(m[mo]||0)+toQAR(x.amount,x.currency); }); return m; }
+function fixedAvg(){ const m=fixedByMonth(); const ms=Object.keys(m).filter(mo=>mo<curMonth()); const n=ms.length; return {avg:n?ms.reduce((s,mo)=>s+m[mo],0)/n:(m[curMonth()]||0), months:n, thisMonth:m[curMonth()]||0}; }
+function openFixedMonths(){
+  _sheetBack=openFixedMonths; const m=fixedByMonth(); const ms=Object.keys(m).sort().reverse(); const a=fixedAvg();
+  openSheet(`
+   <h2>📌 ${esc(FIXED_CAT)}</h2>
+   <div class="kv"><span style="font-weight:800">Average per month (past ${a.months} month${a.months!==1?'s':''})</span><span style="font-weight:800;color:var(--red)">${fmt(a.avg,'QAR')}</span></div>
+   <p class="hint" style="margin-top:0">Rent, monthly CliQ, loan, Esraa allowance, Kahramaa, Esraa's line. Not part of “Avg exp / day”.</p>
+   <div class="list">${ms.length?ms.map(mo=>`<div class="item tap" onclick="_expView='cat';openExpMonth('${mo}')"><div class="em">📅</div><div class="mid"><div class="t">${monthLabel(mo)}${mo===curMonth()?' <span class="badge paid">this month</span>':''}</div><div class="s">${S.txns.filter(x=>isExp(x)&&expenseCat(x)===FIXED_CAT&&(x.date||'').slice(0,7)===mo).map(x=>esc(displayTitle(x))).join(' · ').slice(0,90)}</div></div><div class="amt neg" style="flex:none">${fmt(m[mo],'QAR')}</div></div>`).join(''):'<div class="empty">Nothing yet.</div>'}</div>
+  `);
 }
 let _avgMo=null;
 function openAvgDay(mo){
@@ -2637,7 +2677,7 @@ migrateEsraaSplit();      // Shopping↔Esraa rename split (once)
 migrateUaeRate();         // UAE default car revenue 850 → 500 (once)
 migrateCatMemory();       // re-key learned categories to the smarter merchant keys (once)
 runAutoSalary();          // add this month's salary automatically if due
-seedRecurring(); runAutoRecurring();   // fixed monthly expenses (Esraa allowance, Jordan loan, …)
+seedRecurring(); migrateFixedCat(); runAutoRecurring();   // fixed monthly expenses + the ثابت كل شهر category
 recordDailyBalance();     // snapshot today's total balance for the monthly Difference field
 render();
 refreshFX();              // silent live FX on open
