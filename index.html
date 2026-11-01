@@ -297,7 +297,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-10-12-pending-fixed';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-11-01-fixed-alloc2';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -465,13 +465,13 @@ function render(){
     </div>
     <div class="acard tap" onclick="openFixedMonths()">
       <div class="ic">📌</div><div class="nm">Monthly fixed avg</div>
-      ${(()=>{ const a=fixedAvg(); return `<div class="bal" style="color:var(--red)">${fmt(a.avg,'QAR')}</div><div class="sub">this month ${fmt(a.thisMonth,'QAR')} · ${a.months} past month${a.months!==1?'s':''}</div>`; })()}
+      ${(()=>{ const a=fixedAvg(); return `<div class="bal" style="color:var(--red)">${fmt(a.avg,'QAR')}</div><div class="sub">${(()=>{const fp=fixedPending(curMonth()); return 'this month '+fmt(fp.paid,'QAR')+' of ~'+fmt(fp.expected,'QAR')+' (same as '+monthLabel(monthShift(curMonth(),-1)).split(' ')[0]+')';})()}</div>`; })()}
     </div>
     <div class="acard tap" onclick="openAvgDay()">
       <div class="ic">📆</div><div class="nm">Avg exp / day</div>
       ${(()=>{ const cur=curMonth(), day=Math.max(1,+today().slice(8,10)); const a=expStats(cur,day), b=expStats(monthShift(cur,-1),daysInMonth(monthShift(cur,-1))); const d=b.avg>0?Math.round((a.avg-b.avg)/b.avg*100):null;
         const col = d==null ? 'var(--text)' : (d<=-5 ? 'var(--green)' : (d>=5 ? 'var(--red)' : 'var(--amber)'));   // better / about the same (±5%) / worse than last month
-        const left=daysInMonth(cur)-day, fp=fixedPending(cur), proj=a.total+a.avg*left+fp.total;   // pace till month end + fixed bills not paid yet
+        const left=daysInMonth(cur)-day, fp=fixedPending(cur), pace=(day<7&&b.avg>0)?b.avg:a.avg, proj=a.total+pace*left+fp.total;   // first week → last month's pace   // pace till month end + fixed bills not paid yet
         return `<div class="bal" style="color:${col}">${fmt(a.avg,'QAR')}</div><div class="sub">${d==null?monthLabel(cur):`<span style="color:${col}">${d>0?'▲':(d<0?'▼':'=')} ${Math.abs(d)}%</span> vs last month`}</div><div class="sub" style="margin-top:2px">≈ <b>${fmt(proj,'QAR')}</b> by month end${fp.pending.length?` <span class="dim">(incl. ${fmt(fp.total,'QAR')} unpaid: ${esc(fp.pending.map(p=>p.name).join(', '))})</span>`:''}</div>`; })()}
     </div>
     <div class="acard tap" onclick="openDiffMonths()">
@@ -735,7 +735,7 @@ function isFixedItem(x){
   const t=((x.title||'')+' '+(x.raw||'')).toLowerCase(), amt=toQAR(x.amount||0,x.currency||'QAR');
   if(amt>=1000 && (x.cat==='Rent'||x.cat===FIXED_CAT||/cheque|rent|إيجار|ايجار/.test(t))) return true;   // the rent cheque (QNB "A cheque was debited")
   if(/كليك|cliq/.test(t) && /mufeed/.test(t)) return true;                       // monthly CliQ to Mufeed
-  if(/jordan loan|loan jo|esraa allowance|kahramaa|كهرماء|vodafone|marafeq|مرافق|lusail city district|district c|qatar ?cool/.test(t)) return true;   // + Marafeq AC (district cooling) bill
+  if(/jordan loan|loan jo|esraa allowance|esraa masrof|kahra\s*maa|كهرماء|vodafone|marafeq|مرافق|lusail city district|district c|lcdcc|qatar ?cool/.test(t)) return true;   // + Marafeq AC (district cooling) bill
   return false;
 }
 /* one-time: create the 'ثابت كل شهر' category and move past fixed items into it (amounts untouched); tiny bank-fee debits leave Rent */
@@ -752,6 +752,11 @@ function migrateFixedCat(){
   (S.settings.recurring||[]).forEach(r=>r.cat=FIXED_CAT);
   S.settings.avgExclude={cats:[FIXED_CAT,'Rent'],words:[]};   // avg/day leaves out the whole fixed category (CliQ now lives there)
   S.settings.fixedCatV1=true;
+}
+function migrateFixedCatV2(){
+  if(S.settings.fixedCatV2) return;
+  (S.txns||[]).forEach(x=>{ if(x.dir<0 && x.cat!==FIXED_CAT && isFixedItem(x)){ x.cat=FIXED_CAT; x.catEdited=true; x.fixed=true; } });
+  S.settings.fixedCatV2=true;
 }
 function seedRecurring(){
   if(S.settings.recurringSeeded) return;
@@ -2013,7 +2018,7 @@ async function syncCloud(opts){
     if(d.state && ((d.updatedAt||0) > (S.updatedAt||0) || localEmpty)){        // remote is newer → adopt
       S={...clone(DEFAULT),...d.state}; localStorage.setItem(LS,JSON.stringify(S));
       retitleOldSms();                                        // re-title merchants on the freshly-adopted data
-      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); migrateFixedCat(); runAutoRecurring();   // re-apply one-time migrations to adopted data
+      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); runAutoRecurring();   // re-apply one-time migrations to adopted data
       render();
     }
     const ri=await fetch(base+'/inbox',{headers:cloudHeaders()});
@@ -2219,7 +2224,7 @@ function applyInboxItem(it){
       log('📩',det,'Bank SMS → '+accName(acc)+fx,amount,cur,1,date,null,{kind:'income',account:acc,detail:det});
     }else{
       log('📩',det,'Bank SMS · '+accName(acc)+fx,amount,cur,-1,date,null,{kind:'expense',account:acc,detail:det});
-      { const nx=S.txns[S.txns.length-1]; const mk=merchantKey(nx); nx.cat=it.category||(isFixedItem(nx)?FIXED_CAT:null)||(S.settings.catMemory||{})[mk]||categorize(it.raw||det); if(nx.cat===FIXED_CAT) nx.fixed=true; }   // learned merchant wins for NEW entries
+      { const nx=S.txns[S.txns.length-1]; const mk=merchantKey(nx); nx.cat=it.category||(isFixedItem({...nx,raw:it.raw})?FIXED_CAT:null)||(S.settings.catMemory||{})[mk]||categorize(it.raw||det); if(nx.cat===FIXED_CAT) nx.fixed=true; }   // learned merchant wins for NEW entries
     }
     const x=S.txns[S.txns.length-1]; x.time=time; x.raw=it.raw;   // merchant time + keep full message
   }
@@ -2362,7 +2367,7 @@ function dailyChartHtml(mo){
   const yl=[0,0.5,1].map(f=>`<text x="${L-4}" y="${(y(max*f)+3).toFixed(1)}" font-size="9" text-anchor="end" fill="var(--muted)">${Math.round(max*f).toLocaleString('en')}</text>`).join('');
   const peak=days.indexOf(max);
   return `<div style="margin:8px 0 4px">
-   ${isCur?`<div class="kv"><span style="font-weight:700">If this pace holds → month total</span><span style="font-weight:700;color:var(--red)">${fmt((()=>{const st=expStats(mo,lastDay),fp=fixedPending(mo);return st.total+st.avg*(nd-lastDay)+fp.total;})(),'QAR')}</span></div><p class="hint" style="margin-top:0">= spent so far (everything) + avg/day × ${nd-lastDay} days left${(()=>{const fp=fixedPending(mo);return fp.pending.length?' + fixed bills not paid yet: '+fp.pending.map(p=>esc(p.name)+' '+fmt(p.amount,'QAR')).join(', '):' (all fixed bills already paid)';})()}</p>`:''}
+   ${isCur?`<div class="kv"><span style="font-weight:700">If this pace holds → month total</span><span style="font-weight:700;color:var(--red)">${fmt((()=>{const st=expStats(mo,lastDay),fp=fixedPending(mo);const pv=expStats(monthShift(mo,-1),daysInMonth(monthShift(mo,-1))).avg, pace=(isCur&&lastDay<7&&pv>0)?pv:st.avg; return st.total+pace*(nd-lastDay)+fp.total;})(),'QAR')}</span></div><p class="hint" style="margin-top:0">= spent so far (everything) + ${lastDay<7?'last month\'s ':''}avg/day × ${nd-lastDay} days left${(()=>{const fp=fixedPending(mo);return fp.pending.length?' + fixed bills not paid yet: '+fp.pending.map(p=>esc(p.name)+' '+fmt(p.amount,'QAR')).join(', '):' (all fixed bills already paid)';})()}</p>`:''}
    <div class="between"><span class="s">Daily spending · ${monthLabel(mo)}</span><span class="s">avg <b>${fmt(avg,'QAR')}</b>/day · peak day ${peak+1}: <b>${fmt(max,'QAR')}</b></span></div>
    <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;margin-top:4px">${yl}${bars}
      <line x1="${L}" x2="${W-4}" y1="${y(avg).toFixed(1)}" y2="${y(avg).toFixed(1)}" stroke="var(--green)" stroke-dasharray="4 3" stroke-width="1.2"/>
@@ -2392,6 +2397,8 @@ function openFixedMonths(){
    <h2>📌 ${esc(FIXED_CAT)}</h2>
    <div class="kv"><span style="font-weight:800">Average per month (past ${a.months} month${a.months!==1?'s':''})</span><span style="font-weight:800;color:var(--red)">${fmt(a.avg,'QAR')}</span></div>
    <p class="hint" style="margin-top:0">Rent, monthly CliQ, loan, Esraa allowance, Kahramaa, Esraa's line. Not part of “Avg exp / day”.</p>
+   ${(()=>{const fp=fixedPending(curMonth()); return `<label class="f">${monthLabel(curMonth())} allocation (same as last month)</label><div class="list">${fp.plan.map(p=>`<div class="item"><div class="em">${p.paid+1>=p.expected?'✅':'⏳'}</div><div class="mid"><div class="t">${esc(p.name)}</div><div class="s">paid ${fmt(p.paid,'QAR')} of ${fmt(p.expected,'QAR')}</div></div></div>`).join('')}</div><div class="kv"><span style="font-weight:700">Total</span><span style="font-weight:700">${fmt(fp.paid,'QAR')} / ${fmt(fp.expected,'QAR')}</span></div>`;})()}
+   <label class="f">By month</label>
    <div class="list">${ms.length?ms.map(mo=>`<div class="item tap" onclick="_expView='cat';openExpMonth('${mo}')"><div class="em">📅</div><div class="mid"><div class="t">${monthLabel(mo)}${mo===curMonth()?' <span class="badge paid">this month</span>':''}</div><div class="s">${S.txns.filter(x=>isExp(x)&&expenseCat(x)===FIXED_CAT&&(x.date||'').slice(0,7)===mo).map(x=>esc(displayTitle(x))).join(' · ').slice(0,90)}</div></div><div class="amt neg" style="flex:none">${fmt(m[mo],'QAR')}</div></div>`).join(''):'<div class="empty">Nothing yet.</div>'}</div>
   `);
 }
@@ -2400,23 +2407,24 @@ const FIXED_KINDS=[
   {k:'rent',   name:'Rent',          test:(t,amt)=>amt>=1000&&/cheque|rent|إيجار|ايجار/.test(t)},
   {k:'cliq',   name:'CliQ Mufeed',   test:t=>/كليك|cliq/.test(t)&&/mufeed/.test(t)},
   {k:'loan',   name:'Jordan loan',   test:t=>/jordan loan|loan jo/.test(t)},
-  {k:'esraa',  name:'Esraa allowance',test:t=>/esraa allowance/.test(t)},
-  {k:'kahramaa',name:'Kahramaa',     test:t=>/kahramaa|كهرماء/.test(t)},
+  {k:'esraa',  name:'Esraa allowance',test:t=>/esraa allowance|esraa masrof|مصروف اسراء|مصروف إسراء/.test(t)},
+  {k:'kahramaa',name:'Kahramaa',     test:t=>/kahra\s*maa|كهرماء/.test(t)},
   {k:'vodafone',name:'Vodafone',     test:t=>/vodafone/.test(t)},
-  {k:'cooling', name:'Marafeq (AC)', test:t=>/marafeq|مرافق|lusail city district|district c|qatar ?cool/.test(t)},
+  {k:'cooling', name:'Marafeq (AC)', test:t=>/marafeq|مرافق|lusail city district|district c|lcdcc|qatar ?cool/.test(t)},
 ];
+/* this month's fixed allocation = the same items (and amounts) as LAST month; pending = what of it isn't paid yet */
 function fixedPending(mo){
-  const txt=x=>((x.title||'')+' '+(x.raw||'')).toLowerCase();
+  const txt=x=>((x.title||'')+' '+(x.raw||'')).toLowerCase(), prev=monthShift(mo,-1);
   const exps=S.txns.filter(x=>x.dir<0);
-  const pending=[];
+  const pending=[], plan=[]; let expected=0, paid=0;
   FIXED_KINDS.forEach(f=>{
     const hits=exps.filter(x=>f.test(txt(x),toQAR(x.amount,x.currency)));
-    if(hits.some(x=>(x.date||'').slice(0,7)===mo)) return;                       // already paid this month
-    const past=hits.filter(x=>(x.date||'').slice(0,7)<mo).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-    if(!past.length) return;                                                       // never seen → nothing to expect
-    pending.push({name:f.name,amount:toQAR(past[0].amount,past[0].currency)});     // most recent amount
+    const sum=m=>hits.filter(x=>(x.date||'').slice(0,7)===m).reduce((s,x)=>s+toQAR(x.amount,x.currency),0);
+    const exp=sum(prev), got=sum(mo); if(!exp&&!got) return;
+    expected+=Math.max(exp,got); paid+=got; plan.push({name:f.name,expected:exp,paid:got});
+    if(exp>got+1) pending.push({name:f.name,amount:exp-got});                       // e.g. Vodafone: 2 bills last month, 1 paid so far
   });
-  return {pending,total:pending.reduce((s,p)=>s+p.amount,0)};
+  return {pending,total:pending.reduce((s,p)=>s+p.amount,0),expected,paid,plan};
 }
 let _avgMo=null;
 function openAvgDay(mo){
@@ -2700,7 +2708,7 @@ migrateEsraaSplit();      // Shopping↔Esraa rename split (once)
 migrateUaeRate();         // UAE default car revenue 850 → 500 (once)
 migrateCatMemory();       // re-key learned categories to the smarter merchant keys (once)
 runAutoSalary();          // add this month's salary automatically if due
-seedRecurring(); migrateFixedCat(); runAutoRecurring();   // fixed monthly expenses + the ثابت كل شهر category
+seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); runAutoRecurring();   // fixed monthly expenses + the ثابت كل شهر category
 recordDailyBalance();     // snapshot today's total balance for the monthly Difference field
 render();
 refreshFX();              // silent live FX on open
