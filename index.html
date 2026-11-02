@@ -251,6 +251,11 @@ function carRevToDay(mo,dayCap){
   const ents=(S.carRevEntries||[]).filter(inMo).reduce((s,e)=>s+(+e.count||0)*(e.rate!=null?+e.rate:carRate(e.country)),0);
   return cars+ents;
 }
+/* general (non-car) revenue = manual Revenue→General entries. Counted like car revenue in Savings + the Revenue card. */
+function isGenRev(x){ return x.dir>0 && x.edit && x.edit.kind==='income' && !x.raw; }
+function genRevByMonth(){ const m={}; S.txns.filter(isGenRev).forEach(x=>{ const mo=(x.date||today()).slice(0,7); if(!m[mo])m[mo]={total:0,items:[]}; m[mo].total+=toQAR(x.amount,x.currency); m[mo].items.push(x); }); return m; }
+function genRevForMonth(mo){ const g=genRevByMonth()[mo]; return g?g.total:0; }
+function genRevToDay(mo,dayCap){ return S.txns.filter(x=>isGenRev(x)&&(x.date||'').slice(0,7)===mo&&+(x.date||'').slice(8,10)<=dayCap).reduce((s,x)=>s+toQAR(x.amount,x.currency),0); }
 function carRevByMonth(){
   const m={};
   const slot=mo=>{ if(!m[mo])m[mo]={total:0,count:0,cars:[],entries:[]}; return m[mo]; };
@@ -297,7 +302,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-11-01-fixed-alloc2';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-11-02-general-rev';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -422,7 +427,8 @@ function render(){
   const grams=t.grams;
   const goldPL = t.goldQAR - S.gold.reduce((s,g)=>s+toQAR(g.buyJOD,'JOD'),0);
   const cmCarData = carRevByMonth()[curMonth()]||{total:0,count:0};
-  const cmRev = cmCarData.total;
+  const cmGen = genRevForMonth(curMonth());
+  const cmRev = cmCarData.total + cmGen;
   const cmCount = cmCarData.count;
   const _cmExpOv=(S.settings.expOverride||{})[curMonth()];
   const cmExp = (_cmExpOv!=null && _cmExpOv!=='') ? (+_cmExpOv||0)
@@ -448,8 +454,8 @@ function render(){
     <div class="acard tap" onclick="openCarRev()">
       <div class="ic">📤</div><div class="nm">Rev from cars</div>
       <div class="bal" style="color:var(--green)">${fmt(cmRev,'QAR')}</div>
-      <div class="sub">${monthLabel(curMonth())} · ${cmCount} car${cmCount!==1?'s':''}</div>
-      ${(()=>{ const day=Math.max(1,+today().slice(8,10)); const a=carRevToDay(curMonth(),day), b=carRevToDay(monthShift(curMonth(),-1),day);
+      <div class="sub">${monthLabel(curMonth())} · ${cmCount} car${cmCount!==1?'s':''}${cmGen?` · <span style="color:var(--green)">incl. ${fmt(cmGen,'QAR')} general rev</span>`:''}</div>
+      ${(()=>{ const day=Math.max(1,+today().slice(8,10)); const a=carRevToDay(curMonth(),day)+genRevToDay(curMonth(),day), b=carRevToDay(monthShift(curMonth(),-1),day)+genRevToDay(monthShift(curMonth(),-1),day);
         if(!(b>0)) return ''; const d=Math.round((a-b)/b*100); const col=d>=5?'var(--green)':(d<=-5?'var(--red)':'var(--amber)');
         return `<div class="sub" style="color:${col}">${d>0?'▲':(d<0?'▼':'=')} ${Math.abs(d)}% vs last month · to day ${day}</div>`; })()}
     </div>
@@ -461,7 +467,7 @@ function render(){
     <div class="acard tap" onclick="openSavings()">
       <div class="ic">🐖</div><div class="nm">Savings this month</div>
       <div class="bal" style="color:${cmSavings>=0?'var(--green)':'var(--red)'}">${fmt(cmSavings,'QAR')}</div>
-      <div class="sub">salary + car rev − exp</div>
+      <div class="sub">salary + car rev + general rev − exp</div>
     </div>
     <div class="acard tap" onclick="openFixedMonths()">
       <div class="ic">📌</div><div class="nm">Monthly fixed avg</div>
@@ -561,13 +567,19 @@ function withdraw(acc, amount, cur){ const d= fromQAR(toQAR(amount,cur), accCurr
 function reverseEffects(effects){ (effects||[]).forEach(e=>{ if(e&&S.accounts[e.account]!=null) S.accounts[e.account]-=e.delta; }); }
 
 /* ---------------- REVENUE ---------------- */
-let rev={cat:'income',recv:false,country:'Qatar'};
+let rev={cat:'income',recv:false,country:'Qatar',inBal:true};
 function openRevenue(){
-  rev={cat:'income',recv:false,country:'Qatar'};
+  rev={cat:'income',recv:false,country:'Qatar',inBal:true};
   openSheet(`
    <h2>💰 Add revenue</h2>
    <label class="f">Category</label>
-   <div class="seg"><button id="rc-income" class="on" onclick="revCat('income')">Income</button><button id="rc-cars" onclick="revCat('cars')">Cars</button></div>
+   <div class="seg"><button id="rc-income" class="on" onclick="revCat('income')">General rev</button><button id="rc-cars" onclick="revCat('cars')">Cars</button></div>
+
+   <div id="incomeBlock">
+     <label class="f">Is this money already in my account balance?</label>
+     <div class="seg"><button id="rb-yes" class="on" onclick="revInBal(true)">Yes, already there</button><button id="rb-no" onclick="revInBal(false)">No, add to account</button></div>
+     <p class="hint" style="margin:6px 0 0">Counted in Savings and in the Revenue card. "Already there" doesn't touch the balance (e.g. the bank SMS added it).</p>
+   </div>
 
    <div id="carsBlock" class="hide">
      <label class="f">Is it receivable (not paid yet)?</label>
@@ -585,11 +597,13 @@ function openRevenue(){
    ${dateField('rvDate')}
    <button class="btn" onclick="saveRevenue()">Save revenue</button>
   `);
+  syncAcctWrap();   // general rev "already in balance" is the default → no account picker
 }
-function revCat(c){ rev.cat=c; document.getElementById('rc-income').classList.toggle('on',c==='income'); document.getElementById('rc-cars').classList.toggle('on',c==='cars'); document.getElementById('carsBlock').classList.toggle('hide',c!=='cars'); syncAcctWrap(); }
+function revCat(c){ rev.cat=c; document.getElementById('rc-income').classList.toggle('on',c==='income'); document.getElementById('rc-cars').classList.toggle('on',c==='cars'); document.getElementById('carsBlock').classList.toggle('hide',c!=='cars'); document.getElementById('incomeBlock').classList.toggle('hide',c!=='income'); syncAcctWrap(); }
+function revInBal(v){ rev.inBal=v; document.getElementById('rb-yes').classList.toggle('on',v); document.getElementById('rb-no').classList.toggle('on',!v); syncAcctWrap(); }
 function revRecv(v){ rev.recv=v; document.getElementById('rr-yes').classList.toggle('on',v); document.getElementById('rr-no').classList.toggle('on',!v); syncAcctWrap(); }
 function revCountry(c){ rev.country=c; document.getElementById('rq-Qatar').classList.toggle('on',c==='Qatar'); document.getElementById('rq-UAE').classList.toggle('on',c==='UAE'); }
-function syncAcctWrap(){ const hide = rev.cat==='cars' && rev.recv; document.getElementById('acctWrap').classList.toggle('hide',hide); }
+function syncAcctWrap(){ const hide = (rev.cat==='cars' && rev.recv) || (rev.cat==='income' && rev.inBal); document.getElementById('acctWrap').classList.toggle('hide',hide); }
 function saveRevenue(){
   const amount=num(document.getElementById('rvAmt').value);
   const cur=document.getElementById('rvCur').value;
@@ -607,10 +621,13 @@ function saveRevenue(){
       const c={id:uid(),amount,currency:cur,country:rev.country,status:'paid',account:acc,detail:det,date,effect:eff};
       S.cars.push(c); carTxnSync(c);
     }
+  }else if(rev.inBal){
+    // general revenue that is already in the balance: record only (counts in Savings + Revenue card), no money move
+    log('💵',det||'General revenue','General revenue · already in balance',amount,cur,1,date,null,{kind:'income',account:'',detail:det,noDeposit:true});
   }else{
     const acc=document.getElementById('rvAcc').value;
     const eff=deposit(acc,amount,cur);
-    log('💰',det||'Income','Income → '+accName(acc),amount,cur,1,date,[eff],{kind:'income',account:acc,detail:det});
+    log('💵',det||'General revenue','General revenue → '+accName(acc),amount,cur,1,date,[eff],{kind:'income',account:acc,detail:det});
   }
   save(); closeSheet(); toast('Revenue saved');
 }
@@ -752,6 +769,12 @@ function migrateFixedCat(){
   (S.settings.recurring||[]).forEach(r=>r.cat=FIXED_CAT);
   S.settings.avgExclude={cats:[FIXED_CAT,'Rent'],words:[]};   // avg/day leaves out the whole fixed category (CliQ now lives there)
   S.settings.fixedCatV1=true;
+}
+function migrateGenRevV1(){
+  if(S.settings.genRevV1) return; S.settings.genRevV1=true; let n=0;
+  S.txns.filter(x=>isGenRev(x)&&(x.date||'')>='2026-11-01'&&!x.edit.noDeposit).forEach(x=>{
+    reverseEffects(x.effects); x.effects=null; x.edit={...x.edit,noDeposit:true}; x.emoji='💵'; x.sub='General revenue · already in balance'; n++; });
+  if(n) save();
 }
 function migrateFixedCatV2(){
   if(S.settings.fixedCatV2) return;
@@ -1473,27 +1496,33 @@ function shareCarsWhatsApp(){
 
 /* ---------------- CAR EXPORT REVENUE ---------------- */
 function openCarRev(){
-  const byM=carRevByMonth();
-  const months=Object.keys(byM).sort().reverse();
-  const grand=months.reduce((s,mo)=>s+byM[mo].total,0);
+  const byM=carRevByMonth(), gen=genRevByMonth();
+  const months=[...new Set([...Object.keys(byM),...Object.keys(gen)])].sort().reverse();
+  const grandCars=months.reduce((s,mo)=>s+(byM[mo]?byM[mo].total:0),0), grandGen=months.reduce((s,mo)=>s+(gen[mo]?gen[mo].total:0),0), grand=grandCars+grandGen;
+  const bm=mo=>byM[mo]||{total:0,count:0}, gm=mo=>gen[mo]?gen[mo].total:0;
   openSheet(`
-   <h2>📤 Revenue from cars</h2>
+   <h2>📤 Revenue</h2>
    <div class="between" style="margin-bottom:8px"><p class="hint" style="margin:0">Each exported car earns: 🇦🇪 UAE ${fmt(S.settings.carRevUAE,'QAR')} · 🇶🇦 Qatar ${fmt(S.settings.carRevQatar,'QAR')}.</p><a onclick="editCarRates()" style="color:var(--accent);font-size:12px;white-space:nowrap">✎ Rates</a></div>
-   <button class="btn" onclick="openAddCarRev()">➕ Add revenue (by number of cars)</button>
+   <div class="row" style="gap:8px"><button class="btn" onclick="openAddCarRev()">➕ Cars (by count)</button><button class="btn ghost" onclick="openRevenue()">➕ General revenue</button></div>
    <div class="kv" style="margin-top:12px"><span style="font-weight:800">All-time total</span><span style="font-weight:800;color:var(--green)">${fmt(grand,'QAR')}</span></div>
+   <div class="kv"><span class="dim">🚗 cars ${fmt(grandCars,'QAR')} · 💵 general ${fmt(grandGen,'QAR')}</span><span></span></div>
    <div class="list" style="margin-top:10px">${months.length? months.map(mo=>`
      <div class="item tap" onclick="openCarRevMonth('${mo}')"><div class="em">📅</div>
      <div class="mid"><div class="t">${monthLabel(mo)}${mo===curMonth()?' <span class="badge paid">this month</span>':''}</div>
-     <div class="s">${byM[mo].count} car${byM[mo].count!==1?'s':''}</div></div>
-     <div style="text-align:right"><div class="amt pos">${fmt(byM[mo].total,'QAR')}</div><div class="s" style="color:var(--accent)">view ›</div></div></div>`).join('')
+     <div class="s">${bm(mo).count} car${bm(mo).count!==1?'s':''}${gm(mo)?' · general '+fmt(gm(mo),'QAR'):''}</div></div>
+     <div style="text-align:right"><div class="amt pos">${fmt(bm(mo).total+gm(mo),'QAR')}</div><div class="s" style="color:var(--accent)">view ›</div></div></div>`).join('')
      : '<div class="empty">No cars yet — add cars and their monthly revenue appears here.</div>'}</div>
   `);
 }
 function openCarRevMonth(mo){
   const g=carRevByMonth()[mo]||{total:0,count:0,cars:[]};
+  const gen=genRevByMonth()[mo]||{total:0,items:[]};
+  _sheetBack=()=>openCarRevMonth(mo);   // editing/deleting a general-revenue entry returns here
   openSheet(`
    <h2>📤 ${monthLabel(mo)}</h2>
-   <div class="kv"><span style="font-weight:800">Revenue this month${g.override?' <span class="badge">manual</span>':''}</span><span style="font-weight:800;color:var(--green)">${fmt(g.total,'QAR')}</span></div>
+   <div class="kv"><span style="font-weight:800">Revenue this month</span><span style="font-weight:800;color:var(--green)">${fmt(g.total+gen.total,'QAR')}</span></div>
+   <div class="kv"><span>🚗 From cars${g.override?' <span class="badge">manual</span>':''}</span><span style="color:var(--green)">${fmt(g.total,'QAR')}</span></div>
+   <div class="kv"><span>💵 General revenue</span><span style="color:var(--green)">${fmt(gen.total,'QAR')}</span></div>
    <div class="kv"><span>Cars exported</span><span>${g.count}</span></div>
    <label class="f">✎ Set month total manually (QAR)</label>
    <input id="carRevOv" type="text" inputmode="decimal" value="${(S.settings.carRevOverride||{})[mo]!=null?(S.settings.carRevOverride||{})[mo]:''}" placeholder="leave blank to auto-total">
@@ -1510,7 +1539,15 @@ function openCarRevMonth(mo){
        <div class="s">manual entry · ${fmtDate(e.date)}</div></div>
        <div style="text-align:right"><div class="amt pos">${fmt(e.count*carRate(e.country),'QAR')}</div>
        <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editCarRevEntry('${e.id}','${mo}')">Edit</button><button class="del" onclick="delCarRevEntry('${e.id}','${mo}')">Del</button></div></div></div>`).join('')}</div>
-   <button class="btn" onclick="openAddCarRev()">➕ Add revenue (by count)</button>
+   <label class="f" style="margin-top:14px">💵 General revenue (not from cars)</label>
+   <div class="list">${gen.items.length? gen.items.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(x=>`
+     <div class="item"><div class="em">💵</div><div class="mid">
+       <div class="t">${esc(x.edit.detail||'General revenue')}</div>
+       <div class="s">${x.edit.noDeposit?'already in balance':'added to '+accName(x.edit.account)} · ${fmtDate(x.date)}</div></div>
+       <div style="text-align:right"><div class="amt pos">${fmt(x.amount,x.currency)}</div>
+       <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editTxn('${x.id}')">Edit</button><button class="del" onclick="delTxn('${x.id}')">Del</button></div></div></div>`).join('')
+     : '<div class="empty">No general revenue this month.</div>'}</div>
+   <div class="row" style="gap:8px"><button class="btn" onclick="openAddCarRev()">➕ Cars (by count)</button><button class="btn ghost" onclick="openRevenue()">➕ General revenue</button></div>
    <button class="btn ghost" onclick="openCarRev()">← All months</button>
   `);
 }
@@ -1871,6 +1908,7 @@ function editTxn(id){
    <div class="amtrow"><input id="etAmt" type="text" inputmode="decimal" value="${x.amount}"><select id="etCur">${curOptions(x.currency)}</select></div>
    ${x.edit.kind==='expense'
      ? `<label class="f">Category</label><select id="etCat">${catOptions(expenseCat(x))}</select>`
+     : x.edit.noDeposit ? `<p class="hint">💵 General revenue — already in your balance, so editing it never moves money.</p>`
      : `<label class="f">Into account</label><select id="etAcc">${accountOptions(x.edit.account)}</select>`}
    <label class="f">Detail</label><input id="etDet" value="${esc(x.edit.detail||'')}">
    <label class="f">Date</label><input type="date" id="etDate" value="${x.date}">
@@ -1893,11 +1931,14 @@ function saveEditTxn(id){
       const k=merchantKey(x); if(k){ S.settings.catMemory=S.settings.catMemory||{}; S.settings.catMemory[k]=catEl.value; } }  // learn: this merchant → this category
     Object.assign(x,{amount,currency:cur,date,effects:null, title:det||x.cat||'Expense', sub:x.cat||'Expense'});
     x.edit={...x.edit,detail:det};
+  }else if(x.edit.noDeposit){
+    Object.assign(x,{amount,currency:cur,date,effects:null,title:det||'General revenue',sub:'General revenue · already in balance'});
+    x.edit={...x.edit,detail:det};
   }else{
     const eff=deposit(acc,amount,cur);
-    const label = x.edit.kind==='salary'?'Salary':(det||'Income');
+    const label = x.edit.kind==='salary'?'Salary':(det||'General revenue');
     Object.assign(x,{amount,currency:cur,date,effects:[eff],
-      title:label, sub:(x.edit.kind==='salary'?'Salary → ':'Income → ')+accName(acc)});
+      title:label, sub:(x.edit.kind==='salary'?'Salary → ':'General revenue → ')+accName(acc)});
     x.edit={...x.edit,account:acc,detail:det};
   }
   const back=_sheetBack;   // render() (inside save) clears it — keep it so we return to the page we came from
@@ -2018,7 +2059,7 @@ async function syncCloud(opts){
     if(d.state && ((d.updatedAt||0) > (S.updatedAt||0) || localEmpty)){        // remote is newer → adopt
       S={...clone(DEFAULT),...d.state}; localStorage.setItem(LS,JSON.stringify(S));
       retitleOldSms();                                        // re-title merchants on the freshly-adopted data
-      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); runAutoRecurring();   // re-apply one-time migrations to adopted data
+      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); runAutoRecurring();   // re-apply one-time migrations to adopted data
       render();
     }
     const ri=await fetch(base+'/inbox',{headers:cloudHeaders()});
@@ -2569,10 +2610,11 @@ function saveMonthOverride(mapKey, mo, inputId, reopenFn){
   save(); reopenFn(mo); toast('Saved');
 }
 function savingsManual(mo){ const o=S.settings.savingsByMonth||{}; return (o[mo]!=null && o[mo]!=='')? (+o[mo]||0) : null; }
-function savingsForMonth(mo){ const m=savingsManual(mo); return m!=null ? m : salaryForMonth(mo)+carRevForMonth(mo)-expForMonth(mo); }
+function savingsForMonth(mo){ const m=savingsManual(mo); return m!=null ? m : salaryForMonth(mo)+carRevForMonth(mo)+genRevForMonth(mo)-expForMonth(mo); }
 function activityMonths(){
   const s=new Set([curMonth()]);
   Object.keys(carRevByMonth()).forEach(m=>s.add(m));
+  Object.keys(genRevByMonth()).forEach(m=>s.add(m));
   Object.keys(expByMonth()).forEach(m=>s.add(m));
   Object.keys(S.settings.salaryByMonth||{}).forEach(m=>s.add(m));
   Object.keys(S.settings.savingsByMonth||{}).forEach(m=>s.add(m));
@@ -2582,29 +2624,30 @@ function openSavings(){
   const months=activityMonths();
   openSheet(`
    <h2>🐖 Savings by month</h2>
-   <div class="between" style="margin-bottom:8px"><p class="hint" style="margin:0">Savings = salary + car revenue − expenses. Salary ${fmt(+S.settings.monthlySalary||0,'QAR')}/mo.</p><a onclick="editSalaryBase()" style="color:var(--accent);font-size:12px;white-space:nowrap">✎ Salary</a></div>
+   <div class="between" style="margin-bottom:8px"><p class="hint" style="margin:0">Savings = salary + car revenue + general revenue − expenses. Salary ${fmt(+S.settings.monthlySalary||0,'QAR')}/mo.</p><a onclick="editSalaryBase()" style="color:var(--accent);font-size:12px;white-space:nowrap">✎ Salary</a></div>
    <div class="list">${months.map(mo=>{ const v=savingsForMonth(mo); return `
      <div class="item tap" onclick="openSavingsMonth('${mo}')"><div class="em">📅</div>
      <div class="mid"><div class="t">${monthLabel(mo)}${mo===curMonth()?' <span class="badge paid">this month</span>':''}</div>
-     <div class="s">salary ${fmt(salaryForMonth(mo),'QAR')} · rev ${fmt(carRevForMonth(mo),'QAR')} · exp ${fmt(expForMonth(mo),'QAR')}</div></div>
+     <div class="s">salary ${fmt(salaryForMonth(mo),'QAR')} · cars ${fmt(carRevForMonth(mo),'QAR')}${genRevForMonth(mo)?' · general '+fmt(genRevForMonth(mo),'QAR'):''} · exp ${fmt(expForMonth(mo),'QAR')}</div></div>
      <div style="text-align:right"><div class="amt ${v>=0?'pos':'neg'}">${fmt(v,'QAR')}</div><div class="s" style="color:var(--accent)">view ›</div></div></div>`; }).join('')}</div>
   `);
 }
 function openSavingsMonth(mo){
-  const sal=salaryForMonth(mo), rev=carRevForMonth(mo), exp=expForMonth(mo);
+  const sal=salaryForMonth(mo), rev=carRevForMonth(mo), gen=genRevForMonth(mo), exp=expForMonth(mo);
   const manual=savingsManual(mo), sav=savingsForMonth(mo);
   const custom = (S.settings.salaryByMonth||{})[mo]!=null;
   openSheet(`
    <h2>🐖 ${monthLabel(mo)}</h2>
    <div class="kv"><span>💼 Salary${custom?' <span class="badge">custom</span>':''}</span><span style="color:var(--green)">+${fmt(sal,'QAR')}</span></div>
    <div class="kv"><span>📤 Revenue from cars</span><span style="color:var(--green)">+${fmt(rev,'QAR')}</span></div>
+   <div class="kv tap" onclick="openCarRevMonth('${mo}')"><span>💵 General revenue <span class="dim" style="font-size:12px">manage ›</span></span><span style="color:var(--green)">+${fmt(gen,'QAR')}</span></div>
    <div class="kv"><span>🧾 Expenses</span><span style="color:var(--red)">−${fmt(exp,'QAR')}</span></div>
    <div class="kv" style="border-top:2px solid var(--line);margin-top:4px"><span style="font-weight:800">Savings${manual!=null?' <span class="badge">manual</span>':''}</span><span style="font-weight:800;color:${sav>=0?'var(--green)':'var(--red)'}">${fmt(sav,'QAR')}</span></div>
 
    <label class="f" style="margin-top:14px">✎ Set savings manually (overrides the calculation)</label>
    <input id="savManual" type="text" inputmode="decimal" value="${manual!=null?manual:''}" placeholder="leave blank to auto-calculate">
    <button class="btn" onclick="saveManualSavings('${mo}')">Save savings</button>
-   ${manual!=null?`<button class="btn ghost" onclick="clearManualSavings('${mo}')">↺ Use auto-calculation (${fmt(sal+rev-exp,'QAR')})</button>`:''}
+   ${manual!=null?`<button class="btn ghost" onclick="clearManualSavings('${mo}')">↺ Use auto-calculation (${fmt(sal+rev+gen-exp,'QAR')})</button>`:''}
 
    <label class="f" style="margin-top:16px">Salary for this month (QAR)</label>
    <input id="savSal" type="text" inputmode="decimal" value="${sal}">
@@ -2708,7 +2751,7 @@ migrateEsraaSplit();      // Shopping↔Esraa rename split (once)
 migrateUaeRate();         // UAE default car revenue 850 → 500 (once)
 migrateCatMemory();       // re-key learned categories to the smarter merchant keys (once)
 runAutoSalary();          // add this month's salary automatically if due
-seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); runAutoRecurring();   // fixed monthly expenses + the ثابت كل شهر category
+seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); runAutoRecurring();   // fixed monthly expenses + the ثابت كل شهر category
 recordDailyBalance();     // snapshot today's total balance for the monthly Difference field
 render();
 refreshFX();              // silent live FX on open
