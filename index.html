@@ -302,7 +302,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-11-02-general-rev';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-11-07-europe-fx';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -375,7 +375,8 @@ function cloudPushSoon(){ if(!S.settings.cloudUrl)return; clearTimeout(_pushT); 
 function uid(){ return 'i'+Math.random().toString(36).slice(2,9); }
 
 /* ---------------- MONEY HELPERS ---------------- */
-const R=()=>({QAR:1, JOD:S.settings.rateJODtoQAR, AED:S.settings.rateAEDtoQAR, USD:S.settings.rateUSDtoQAR, THB:0.107, ...(S.settings.rates||{})});
+const FX_FALLBACK={THB:0.107,EUR:4.062,CZK:0.1672,HUF:0.01118,CHF:4.44,TRY:0.0725,PLN:0.9246,GBP:4.868,SEK:0.38,NOK:0.36,DKK:0.544,RON:0.80,BGN:2.077,ISK:0.029,RSD:0.0347,SAR:0.9707,KWD:11.72,BHD:9.68,OMR:9.467,EGP:0.0675,INR:0.0387};   // QAR per 1 unit, used until live rates load
+const R=()=>({...FX_FALLBACK, QAR:1, JOD:S.settings.rateJODtoQAR, AED:S.settings.rateAEDtoQAR, USD:S.settings.rateUSDtoQAR, ...(S.settings.rates||{}), ...(S.settings.fxFixed||{})});   // fxFixed = my own rate (e.g. the bank's real rate incl. fees) — never overwritten by live FX
 function toQAR(a,c){ return a*(R()[c]||1); }
 function fromQAR(a,c){ return a/(R()[c]||1); }
 // normalize a currency token (incl. Arabic) to a 3-letter code
@@ -769,6 +770,12 @@ function migrateFixedCat(){
   (S.settings.recurring||[]).forEach(r=>r.cat=FIXED_CAT);
   S.settings.avgExclude={cats:[FIXED_CAT,'Rent'],words:[]};   // avg/day leaves out the whole fixed category (CliQ now lives there)
   S.settings.fixedCatV1=true;
+}
+function migrateFxV1(){
+  if(S.settings.fxV1) return; S.settings.fxV1=true;
+  S.settings.fxFixed={...(S.settings.fxFixed||{})}; if(S.settings.fxFixed.CZK==null) S.settings.fxFixed.CZK=0.175;   // user's Czech rate (7 Nov 2026)
+  const n=reconvertSmsFx();
+  save(); if(n) setTimeout(()=>toast('Fixed '+n+' foreign-currency amounts'),800);
 }
 function migrateGenRevV1(){
   if(S.settings.genRevV1) return; S.settings.genRevV1=true; let n=0;
@@ -1736,9 +1743,8 @@ async function refreshFX(){
     const r=await fetch('https://open.er-api.com/v6/latest/QAR');   // base QAR → rates[X] = X per 1 QAR
     const j=await r.json();
     if(j&&j.rates){
-      const want=['JOD','AED','USD','SAR','EUR','GBP','KWD','BHD','OMR','TRY','INR','EGP','CAD','AUD','THB'];
       const rates={};
-      want.forEach(c=>{ if(j.rates[c]) rates[c]=+(1/j.rates[c]).toFixed(4); });   // QAR per 1 unit
+      Object.keys(j.rates).forEach(c=>{ if(j.rates[c]>0 && c!=='QAR') rates[c]=+(1/j.rates[c]).toPrecision(5); });   // QAR per 1 unit — every currency (travel-ready)
       S.settings.rates={...(S.settings.rates||{}),...rates};
       if(rates.JOD)S.settings.rateJODtoQAR=rates.JOD;
       if(rates.AED)S.settings.rateAEDtoQAR=rates.AED;
@@ -1975,10 +1981,47 @@ function openSettings(){
    <label class="f">1 gold lira = ? grams</label><input id="stLira" type="number" step="0.01" value="${S.settings.liraGrams}">
    <button class="btn" onclick="saveSettings()">Save settings</button>
    <button class="btn ghost" onclick="refreshFX().then(()=>{openSettings();toast('Rates refreshed')})">↻ Refresh live FX</button>
+   <button class="btn ghost" onclick="openFxFixed()">✈️ Travel rates (my own fixed rates)</button>
    <button class="btn ghost" onclick="openRecurring()">🔁 Fixed monthly expenses</button>
    <button class="btn ghost" onclick="openCloud()">☁️ Cloud sync ${cloudBase()?'· on':''}</button>
    <button class="btn ghost" onclick="openBackup()">💾 Backup &amp; restore</button>
   `);
+}
+/* ---- travel: my own fixed exchange rates (win over live rates; existing SMS entries are re-converted) ---- */
+const TRIP_CURS=['CZK','HUF','EUR','CHF','TRY','PLN','GBP','USD'];
+function openFxFixed(){
+  _sheetBack=openFxFixed;
+  const f=S.settings.fxFixed||{}, cur=[...new Set([...TRIP_CURS,...Object.keys(f)])];
+  openSheet(`
+   <h2>✈️ Travel rates</h2>
+   <p class="hint" style="margin-top:0">QAR per 1 unit. Set the rate your bank actually charges (incl. fees). Leave blank to use the live rate. Saving re-converts that currency's bank-SMS entries.</p>
+   ${cur.map(c=>`<div class="kv"><span><b>${c}</b> <span class="dim" style="font-size:12px">live ${(((S.settings.rates||{})[c])||FX_FALLBACK[c]||0).toFixed(4)}</span></span>
+     <input id="fx_${c}" type="text" inputmode="decimal" style="width:110px;text-align:right" value="${f[c]!=null?f[c]:''}" placeholder="live"></div>`).join('')}
+   <label class="f">Another currency (code)</label><div class="amtrow"><input id="fxNewC" placeholder="e.g. SEK" maxlength="3" style="text-transform:uppercase"><input id="fxNewV" type="text" inputmode="decimal" placeholder="QAR per 1"></div>
+   <button class="btn" onclick="saveFxFixed()">Save rates</button>
+   <button class="btn ghost" onclick="openSettings()">← Settings</button>
+  `);
+}
+function saveFxFixed(){
+  const f={...(S.settings.fxFixed||{})}, cur=[...new Set([...TRIP_CURS,...Object.keys(f)])];
+  cur.forEach(c=>{ const el=document.getElementById('fx_'+c); if(!el) return; const v=el.value.trim(); if(v==='') delete f[c]; else { const n=num(v); if(n>0) f[c]=n; } });
+  const nc=(document.getElementById('fxNewC').value||'').trim().toUpperCase(), nv=num(document.getElementById('fxNewV').value);
+  if(/^[A-Z]{3}$/.test(nc) && nv>0) f[nc]=nv;
+  S.settings.fxFixed=f; const n=reconvertSmsFx(); save(); openFxFixed(); toast('Rates saved'+(n?' · '+n+' entries re-converted':''));
+}
+/* re-convert foreign-currency bank-SMS entries with the current rates (fixes wrong amounts + applies my fixed rates) */
+function reconvertSmsFx(since){
+  let n=0;
+  S.txns.filter(x=>x.raw && (x.date||'')>=(since||'2026-10-01') && x.dir!==0).forEach(x=>{
+    const p=parseSms(x.raw); if(!(p.amount>0) || !p.amtCur || p.amtCur==='QAR' || p.amtCur==='JOD') return;
+    const right=Math.round(toQAR(p.amount,p.amtCur)*100)/100, diff=Math.abs((+x.amount||0)-right);
+    const fixed=(S.settings.fxFixed||{})[p.amtCur]!=null;
+    if(diff<0.01 || (!fixed && diff<=Math.max(1,right*0.05))) return;   // only my fixed-rate currencies, or clearly wrong amounts
+    x.amount=right; x.currency='QAR';
+    const acc=(x.edit&&x.edit.account)||routeAccount(x.raw,'qDebit');
+    x.sub='Bank SMS · '+accName(acc)+'  ·  '+fmt(p.amount,p.amtCur,2); n++;
+  });
+  return n;
 }
 /* ---------------- BACKUP / RESTORE ---------------- */
 function openBackup(){
@@ -2059,7 +2102,7 @@ async function syncCloud(opts){
     if(d.state && ((d.updatedAt||0) > (S.updatedAt||0) || localEmpty)){        // remote is newer → adopt
       S={...clone(DEFAULT),...d.state}; localStorage.setItem(LS,JSON.stringify(S));
       retitleOldSms();                                        // re-title merchants on the freshly-adopted data
-      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); runAutoRecurring();   // re-apply one-time migrations to adopted data
+      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); runAutoRecurring();   // re-apply one-time migrations to adopted data
       render();
     }
     const ri=await fetch(base+'/inbox',{headers:cloudHeaders()});
@@ -2111,16 +2154,18 @@ async function doCloudRestore(which){
 function parseSms(raw){
   raw=(''+(raw||''));
   const norm=raw.replace(/[٠-٩]/g,d=>d.charCodeAt(0)-0x0660).replace(/[۰-۹]/g,d=>d.charCodeAt(0)-0x06F0);
-  const CURS='QAR|JOD|JD|AED|SAR|USD|EUR|GBP|KWD|BHD|OMR|TRY|INR|EGP|CAD|AUD|THB';
+  const CURS='QAR|JOD|JD|AED|SAR|USD|EUR|GBP|KWD|BHD|OMR|TRY|INR|EGP|CAD|AUD|THB|CZK|HUF|CHF|PLN|SEK|NOK|DKK|RON|BGN|ISK|RSD|JPY|CNY|MAD|TND|LBP|IQD';
   // available/running balance: number near a "balance"/"الرصيد" keyword (allow a word like المتوفر/available in between)
   let availBalance=NaN, balCur='';
   const bm=norm.match(new RegExp('(?:available\\s*balance|avail\\.?\\s*bal\\.?|balance|bal\\.?|الرصيد(?:\\s*(?:المتوفر|المتاح))?|رصيد)[^0-9]{0,20}?(?:('+CURS+')\\s*)?([\\d,]+(?:\\.\\d+)?)\\s*('+CURS+'|دينار|ريال)?','i'));
   if(bm){ availBalance=num(bm[2]); balCur=normCur(bm[1]||bm[3]||''); }
   // transaction amount + its currency (prefer a number next to a currency code — avoids the "2" in VISA2)
   let amount=NaN, amtCur='QAR';
-  let am=norm.match(new RegExp('('+CURS+')\\s*([\\d,]+(?:\\.\\d+)?)','i'));
-  if(am){ amtCur=normCur(am[1]); amount=num(am[2]); }
-  else { am=norm.match(new RegExp('([\\d,]+(?:\\.\\d+)?)\\s*('+CURS+')','i')); if(am){ amount=num(am[1]); amtCur=normCur(am[2]); } }
+  // "Amount: CZK 350" — any 3-letter currency code right after "Amount" (never the Available-balance number)
+  let am=norm.match(/amount\s*[:：]?\s*([A-Za-z]{3})\s*([\d,]+(?:\.\d+)?)/i);
+  if(am && !/^(of|for|due)$/i.test(am[1])){ amtCur=normCur(am[1]); amount=num(am[2]); }
+  if(isNaN(amount)){ am=norm.match(new RegExp('('+CURS+')\\s*([\\d,]+(?:\\.\\d+)?)','i')); if(am){ amtCur=normCur(am[1]); amount=num(am[2]); } }
+  if(isNaN(amount)){ am=norm.match(new RegExp('([\\d,]+(?:\\.\\d+)?)\\s*('+CURS+')','i')); if(am){ amount=num(am[1]); amtCur=normCur(am[2]); } }
   if(isNaN(amount)){ const any=norm.match(/([\d,]+\.\d{1,2}|\d{2,}[\d,]*)/); if(any) amount=num(any[1]); }
   // NB: "credited" = money in; plain "credit" (as in "credit card") must NOT count as income
   const credit=/credited|deposit|received|salary|refund|reversal|\bcr\b|إيداع|اضاف|راتب|استلام|مستلم/i.test(raw);
@@ -2325,6 +2370,8 @@ function expenseCat(x){
   if(x.catEdited && x.cat) return remapCat(x.cat);              // user set it manually on this entry → keep it
   // Thailand (THB / baht) spending → always Travel
   if(/\bthb\b|\bbaht\b|thailand|bangkok|phuket|pattaya/i.test((smsSource(x)||'')+' '+(x.title||''))) return remapCat('Travel');
+  // Europe trip (Nov 2026): Czech / Hungary / Portugal / Switzerland / Türkiye transit currencies → Travel
+  if(/amount\s*[:：]?\s*(czk|huf|chf|eur|try|pln)\b/i.test(smsSource(x)||'')) return remapCat('Travel');
   if(x.cat && x.cat!=='General' && x.cat!=='Bank SMS') return remapCat(x.cat);   // entry keeps the category it was given (at creation or by an edit)
   const mem=S.settings.catMemory||{}, k=merchantKey(x);
   if(k && mem[k]) return remapCat(mem[k]);                       // learned merchant → used for entries that have no category yet
@@ -2751,7 +2798,7 @@ migrateEsraaSplit();      // Shopping↔Esraa rename split (once)
 migrateUaeRate();         // UAE default car revenue 850 → 500 (once)
 migrateCatMemory();       // re-key learned categories to the smarter merchant keys (once)
 runAutoSalary();          // add this month's salary automatically if due
-seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); runAutoRecurring();   // fixed monthly expenses + the ثابت كل شهر category
+seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); runAutoRecurring();   // fixed monthly expenses + the ثابت كل شهر category
 recordDailyBalance();     // snapshot today's total balance for the monthly Difference field
 render();
 refreshFX();              // silent live FX on open
