@@ -302,7 +302,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-11-07-europe-fx';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-11-07-try-rate';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -770,6 +770,11 @@ function migrateFixedCat(){
   (S.settings.recurring||[]).forEach(r=>r.cat=FIXED_CAT);
   S.settings.avgExclude={cats:[FIXED_CAT,'Rent'],words:[]};   // avg/day leaves out the whole fixed category (CliQ now lives there)
   S.settings.fixedCatV1=true;
+}
+function migrateFxV2(){   // Istanbul transit: bank's real TRY rate (65 TRY → 4.87 QAR on the credit card, 7 Nov 2026)
+  if(S.settings.fxV2) return; S.settings.fxV2=true;
+  S.settings.fxFixed={...(S.settings.fxFixed||{})}; if(S.settings.fxFixed.TRY==null) S.settings.fxFixed.TRY=0.0749;
+  reconvertSmsFx(); save();
 }
 function migrateFxV1(){
   if(S.settings.fxV1) return; S.settings.fxV1=true;
@@ -2102,7 +2107,7 @@ async function syncCloud(opts){
     if(d.state && ((d.updatedAt||0) > (S.updatedAt||0) || localEmpty)){        // remote is newer → adopt
       S={...clone(DEFAULT),...d.state}; localStorage.setItem(LS,JSON.stringify(S));
       retitleOldSms();                                        // re-title merchants on the freshly-adopted data
-      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); runAutoRecurring();   // re-apply one-time migrations to adopted data
+      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); migrateFxV2(); runAutoRecurring();   // re-apply one-time migrations to adopted data
       render();
     }
     const ri=await fetch(base+'/inbox',{headers:cloudHeaders()});
@@ -2798,7 +2803,7 @@ migrateEsraaSplit();      // Shopping↔Esraa rename split (once)
 migrateUaeRate();         // UAE default car revenue 850 → 500 (once)
 migrateCatMemory();       // re-key learned categories to the smarter merchant keys (once)
 runAutoSalary();          // add this month's salary automatically if due
-seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); runAutoRecurring();   // fixed monthly expenses + the ثابت كل شهر category
+seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); migrateFxV2(); runAutoRecurring();   // fixed monthly expenses + the ثابت كل شهر category
 recordDailyBalance();     // snapshot today's total balance for the monthly Difference field
 render();
 refreshFX();              // silent live FX on open
