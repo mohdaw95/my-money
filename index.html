@@ -302,7 +302,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-11-07-try-rate';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-11-16-cash-fixed';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -753,7 +753,7 @@ function isFixedItem(x){
   const t=((x.title||'')+' '+(x.raw||'')).toLowerCase(), amt=toQAR(x.amount||0,x.currency||'QAR');
   if(amt>=1000 && (x.cat==='Rent'||x.cat===FIXED_CAT||/cheque|rent|إيجار|ايجار/.test(t))) return true;   // the rent cheque (QNB "A cheque was debited")
   if(/كليك|cliq/.test(t) && /mufeed/.test(t)) return true;                       // monthly CliQ to Mufeed
-  if(/jordan loan|loan jo|esraa allowance|esraa masrof|kahra\s*maa|كهرماء|vodafone|marafeq|مرافق|lusail city district|district c|lcdcc|qatar ?cool/.test(t)) return true;   // + Marafeq AC (district cooling) bill
+  if(/jordan loan|loan jo|esraa allowance|esraa masrof|kahra\s*maa|كهرماء|vodafone|marafeq|مرافق|lusail city district|district c|lcdcc|qatar ?cool|apple\.com\/bill/.test(t)) return true;   // + Marafeq AC (district cooling) bill
   return false;
 }
 /* one-time: create the 'ثابت كل شهر' category and move past fixed items into it (amounts untouched); tiny bank-fee debits leave Rent */
@@ -770,6 +770,16 @@ function migrateFixedCat(){
   (S.settings.recurring||[]).forEach(r=>r.cat=FIXED_CAT);
   S.settings.avgExclude={cats:[FIXED_CAT,'Rent'],words:[]};   // avg/day leaves out the whole fixed category (CliQ now lives there)
   S.settings.fixedCatV1=true;
+}
+function migratePastFixedV1(){
+  if(S.settings.pastFixedV1) return; S.settings.pastFixedV1=true; let n=0;
+  const has=(mo,re)=>S.txns.some(x=>x.dir<0 && (x.date||'').slice(0,7)===mo && re.test(((x.title||'')+' '+(x.raw||'')).toLowerCase()));
+  const add=(mo,name,amount,currency)=>{ S.txns.push({id:uid(),emoji:'🔁',title:name,sub:'Fixed monthly · '+monthLabel(mo)+' (added later)',amount,currency,dir:-1,date:mo+'-01',time:'',effects:null,edit:{kind:'expense',account:'',detail:name},cat:FIXED_CAT,catEdited:true,fixed:true,pastFixed:true}); n++; };
+  ['2026-07','2026-08','2026-09'].forEach(mo=>{
+    if(!has(mo,/esraa allowance|esraa masrof|مصروف اسراء|مصروف إسراء/)) add(mo,'Esraa allowance',1500,'QAR');
+    if(!has(mo,/jordan loan|loan jo/)) add(mo,'Jordan loan',110,'JOD');
+  });
+  save(); if(n) setTimeout(()=>toast('Added '+n+' past fixed items (Esraa / loan)'),900);
 }
 function migrateFxV2(){   // Istanbul transit: bank's real TRY rate (65 TRY → 4.87 QAR on the credit card, 7 Nov 2026)
   if(S.settings.fxV2) return; S.settings.fxV2=true;
@@ -1801,16 +1811,26 @@ function openAccount(a){
    <button class="btn ghost" onclick="transferOpen('${a}')">🔁 Transfer to other account</button>
   `);
 }
+/* Cash: when I lower the cash balance by hand, the difference was spent → log it as an expense (no extra balance effect) */
+function logCashSpend(a, before, after){
+  if(a!=='cash' || !(before-after>0.009)) return null;
+  const amt=Math.round((before-after)*100)/100, cur=accCurrency('cash');
+  S.txns.push({id:uid(),emoji:'💵',title:'Cash spending',sub:'Cash · balance lowered '+fmt(before,cur)+' → '+fmt(after,cur),amount:amt,currency:cur,dir:-1,date:today(),time:tsTime(Date.now()),effects:null,edit:{kind:'expense',account:'cash',detail:'Cash spending'},cat:'General',cashSpend:true});
+  return S.txns[S.txns.length-1].id;
+}
 function setAccBal(a){
   const v=num(document.getElementById('accBal').value);
   if(isNaN(v))return toast('Enter a number');
-  S.accounts[a]=v; save(); closeSheet(); toast(accName(a)+' balance updated');
+  const before=S.accounts[a]||0; S.accounts[a]=v; const id=logCashSpend(a,before,v);
+  save(); if(id){ _sheetBack=null; editTxn(id); toast('Cash spending logged · pick a category'); } else { closeSheet(); toast(accName(a)+' balance updated'); }
 }
 function adjAcc(a){
   const v=num(document.getElementById('adjAmt').value); const mode=document.getElementById('adjMode').value;
   if(isNaN(v))return toast('Enter amount');
+  const before=S.accounts[a]||0;
   if(mode==='set')S.accounts[a]=v; else if(mode==='add')S.accounts[a]+=v; else S.accounts[a]-=v;
-  save(); closeSheet(); toast('Updated');
+  const id=logCashSpend(a,before,S.accounts[a]);
+  save(); if(id){ _sheetBack=null; editTxn(id); toast('Cash spending logged · pick a category'); } else { closeSheet(); toast('Updated'); }
 }
 function transferOpen(from){
   const others=ACCTS.filter(a=>a.key!==from);
@@ -2107,7 +2127,7 @@ async function syncCloud(opts){
     if(d.state && ((d.updatedAt||0) > (S.updatedAt||0) || localEmpty)){        // remote is newer → adopt
       S={...clone(DEFAULT),...d.state}; localStorage.setItem(LS,JSON.stringify(S));
       retitleOldSms();                                        // re-title merchants on the freshly-adopted data
-      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); migrateFxV2(); runAutoRecurring();   // re-apply one-time migrations to adopted data
+      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); migrateFxV2(); migratePastFixedV1(); runAutoRecurring();   // re-apply one-time migrations to adopted data
       render();
     }
     const ri=await fetch(base+'/inbox',{headers:cloudHeaders()});
@@ -2507,15 +2527,17 @@ const FIXED_KINDS=[
 ];
 /* this month's fixed allocation = the same items (and amounts) as LAST month; pending = what of it isn't paid yet */
 function fixedPending(mo){
-  const txt=x=>((x.title||'')+' '+(x.raw||'')).toLowerCase(), prev=monthShift(mo,-1);
-  const exps=S.txns.filter(x=>x.dir<0);
+  const txt=x=>((x.title||'')+' '+(x.raw||'')).toLowerCase(), prev=monthShift(mo,-1), amt=x=>toQAR(x.amount,x.currency);
+  const kind=x=>FIXED_KINDS.find(f=>f.test(txt(x),amt(x)));
+  const isFx=x=>isExp(x) && (x.fixed || x.cat===FIXED_CAT || expenseCat(x)===remapCat(FIXED_CAT) || !!kind(x));
+  const name=x=>{ const k=kind(x); return k?k.name:((displayTitle(x)||x.title||'Other').trim()); };
+  const group=m=>{ const g={}; S.txns.filter(x=>(x.date||'').slice(0,7)===m && isFx(x)).forEach(x=>{ const n=name(x); g[n]=(g[n]||0)+amt(x); }); return g; };
+  const P=group(prev), C=group(mo);   // this month's plan = the same fixed items (and amounts) I had LAST month
   const pending=[], plan=[]; let expected=0, paid=0;
-  FIXED_KINDS.forEach(f=>{
-    const hits=exps.filter(x=>f.test(txt(x),toQAR(x.amount,x.currency)));
-    const sum=m=>hits.filter(x=>(x.date||'').slice(0,7)===m).reduce((s,x)=>s+toQAR(x.amount,x.currency),0);
-    const exp=sum(prev), got=sum(mo); if(!exp&&!got) return;
-    expected+=Math.max(exp,got); paid+=got; plan.push({name:f.name,expected:exp,paid:got});
-    if(exp>got+1) pending.push({name:f.name,amount:exp-got});                       // e.g. Vodafone: 2 bills last month, 1 paid so far
+  [...new Set([...Object.keys(P),...Object.keys(C)])].forEach(n=>{
+    const exp=P[n]||0, got=C[n]||0;
+    expected+=Math.max(exp,got); paid+=got; plan.push({name:n,expected:exp,paid:got});
+    if(exp>got+1) pending.push({name:n,amount:exp-got});
   });
   return {pending,total:pending.reduce((s,p)=>s+p.amount,0),expected,paid,plan};
 }
@@ -2803,7 +2825,7 @@ migrateEsraaSplit();      // Shopping↔Esraa rename split (once)
 migrateUaeRate();         // UAE default car revenue 850 → 500 (once)
 migrateCatMemory();       // re-key learned categories to the smarter merchant keys (once)
 runAutoSalary();          // add this month's salary automatically if due
-seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); migrateFxV2(); runAutoRecurring();   // fixed monthly expenses + the ثابت كل شهر category
+seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); migrateFxV2(); migratePastFixedV1(); runAutoRecurring();   // fixed monthly expenses + the ثابت كل شهر category
 recordDailyBalance();     // snapshot today's total balance for the monthly Difference field
 render();
 refreshFX();              // silent live FX on open
