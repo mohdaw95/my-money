@@ -315,7 +315,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-11-23-asset-car15k';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-11-23-undo-challenger';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -798,15 +798,6 @@ function linkAssetTxn(x,a){ if(!x||!(x.dir<0||(x.notExpense&&!x.assetId))) retur
 function unlinkAssetTxn(id){ const x=S.txns.find(t=>t.id===id); if(!x||!x.assetId) return; delete x.assetId; if(x.notExpense){ x.dir=0; x.sub=(x.subOrig||x.sub)+' · not an expense'; return; } x.dir=-1; x.sub=x.subOrig||x.sub; delete x.subOrig; }
 function migrateAssetsV1(){
   if(S.settings.assetsV1) return; S.settings.assetsV1=true; S.assets=S.assets||[];
-  if(!S.assets.some(a=>a.id==='asset-challenger')){
-    const a={id:'asset-challenger',name:'Challenger',price:12000,date:'2026-07-30',target:null,status:'active',links:[],costs:[]};
-    const rows=[['Fast Fix Service',4500,'2026-08-19','ik5zjsub'],['Fawran 66252484',500,'2026-08-11','iy5hzmfs'],['Fawran 33202130',120,'2026-08-05','iodcamd7'],['Al Sahrawi Technical',450,'2026-08-03','ibyse4n5'],['Teyseer Petrol Station',246,'2026-08-03','iq8zhka7'],['Perfect Fix for Car',630,'2026-08-03','ie4h4pgm'],['Car barkdon',100,'2026-08-03','i5dn56td'],['بركدون دودج',120,'2026-10-10','iej6paj3']];
-    rows.forEach(([label,amount,date,tid],i)=>{ const linked=linkAssetTxn(S.txns.find(t=>t.id===tid),a); a.costs.push({id:'ch'+i,label,amount,date,txnId:linked?tid:null}); });
-    if(linkAssetTxn(S.txns.find(t=>t.id==='ipcpozb4'),a)) a.links.push('ipcpozb4');   // "Car purshase dodge": part of the 12,000 purchase
-    S.assets.push(a);
-    S.settings.nwOpeningAdj=[...(S.settings.nwOpeningAdj||[]),{before:today(),amount:assetCost(a)}];   // already owned: adding it is not a gain
-    S.settings.exitItems=(S.settings.exitItems||[]).filter(i=>!/challenger|escalade/i.test(i.name||''));   // now inside net worth, so the Exit plan must not add it again
-  }
   const f=S.txns.find(t=>t.id==='ic1qd6aa');   // 15,000 Fawran, 23 Nov 2026: user said it is not an expense
   if(f&&f.dir<0){ f.subOrig=f.sub; f.dir=0; f.notExpense=true; f.sub=(f.sub||'')+' · not an expense'; }
   save();
@@ -820,11 +811,21 @@ function migrateAssetsV2(){   // the 15,000 Fawran of 23 Nov 2026 is a car's cos
     if(linkAssetTxn(f,a)) a.links.push(f.id);
     S.assets.push(a);
   }
-  const ch=S.assets.find(a=>a.id==='asset-challenger');   // Dodge insurance (QIC 600, 2 Nov 2026) belongs to the Challenger's cost (user)
-  if(ch && ch.status!=='sold' && !(ch.costs||[]).some(k=>k.id==='ch-qic')){
-    const q=S.txns.find(t=>t.id==='i0tb2rhs'); const linked=linkAssetTxn(q,ch);
-    ch.costs=ch.costs||[]; ch.costs.push({id:'ch-qic',label:'QIC insurance',amount:600,date:'2026-11-02',txnId:linked?'i0tb2rhs':null});
+  save();
+}
+function migrateAssetsV3(){   // user (23 Nov 2026): undo everything related to the Challenger
+  if(S.settings.assetsV3) return; S.settings.assetsV3=true; S.assets=S.assets||[];
+  const a=S.assets.find(x=>x.id==='asset-challenger');
+  if(a){
+    (a.links||[]).forEach(unlinkAssetTxn);                                              // "Car purshase dodge" 2,200 → back in July expenses
+    (a.costs||[]).forEach(k=>{ if(k.expTxnId) S.txns=S.txns.filter(t=>t.id!==k.expTxnId); if(k.txnId) unlinkAssetTxn(k.txnId); });   // maintenance + insurance → back in expenses
+    S.assets=S.assets.filter(x=>x.id!=='asset-challenger');
   }
+  S.txns.forEach(x=>{ if(x.assetId==='asset-challenger') unlinkAssetTxn(x.id); });   // safety net: nothing stays tagged to it
+  S.txns=S.txns.filter(x=>x.assetCost!=='asset-challenger');
+  delete S.settings.nwOpeningAdj;                                                      // its net-worth history adjustment
+  const ex=S.settings.exitItems=S.settings.exitItems||[];                              // back in the Exit plan as before
+  if(!ex.some(i=>/challenger/i.test(i.name||''))){ const at=ex.findIndex(i=>/patrol/i.test(i.name||'')); ex.splice(at>=0?at+1:ex.length,0,{name:'Dodge challenger',value:15000}); }
   save();
 }
 function migratePastFixedV1(){
@@ -2374,7 +2375,7 @@ async function syncCloud(opts){
     if(d.state && ((d.updatedAt||0) > (S.updatedAt||0) || localEmpty)){        // remote is newer → adopt
       S={...clone(DEFAULT),...d.state}; localStorage.setItem(LS,JSON.stringify(S));
       retitleOldSms();                                        // re-title merchants on the freshly-adopted data
-      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); migrateFxV2(); migratePastFixedV1(); migrateAssetsV1(); migrateAssetsV2(); runAutoRecurring();   // re-apply one-time migrations to adopted data
+      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); migrateFxV2(); migratePastFixedV1(); migrateAssetsV1(); migrateAssetsV2(); migrateAssetsV3(); runAutoRecurring();   // re-apply one-time migrations to adopted data
       render();
     }
     const ri=await fetch(base+'/inbox',{headers:cloudHeaders()});
@@ -3074,7 +3075,7 @@ migrateEsraaSplit();      // Shopping↔Esraa rename split (once)
 migrateUaeRate();         // UAE default car revenue 850 → 500 (once)
 migrateCatMemory();       // re-key learned categories to the smarter merchant keys (once)
 runAutoSalary();          // add this month's salary automatically if due
-seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); migrateFxV2(); migratePastFixedV1(); migrateAssetsV1(); migrateAssetsV2(); runAutoRecurring();   // fixed monthly expenses + the ثابت كل شهر category
+seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); migrateFxV2(); migratePastFixedV1(); migrateAssetsV1(); migrateAssetsV2(); migrateAssetsV3(); runAutoRecurring();   // fixed monthly expenses + the ثابت كل شهر category
 recordDailyBalance();     // snapshot today's total balance for the monthly Difference field
 render();
 refreshFX();              // silent live FX on open
