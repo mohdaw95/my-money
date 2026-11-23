@@ -315,7 +315,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-11-23-undo-challenger';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-11-23-assets-card-pos';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -463,12 +463,6 @@ function render(){
       <div class="sub">${grams.toLocaleString('en',{maximumFractionDigits:2})} g</div>
       ${grams>0?`<div class="pl ${goldPL>=0?'up':'down'}">${goldPL>=0?'▲':'▼'} ${fmt(Math.abs(goldPL),'QAR')}</div>`:''}
     </div>
-    <div class="acard tap" onclick="openAssets()">
-      <div class="ic">🚘</div><div class="nm">Assets</div>
-      <div class="bal">${fmt(t.assetsQAR,'QAR')}</div>
-      ${(()=>{ const act=(S.assets||[]).filter(a=>a.status!=='sold'), c=act.reduce((s,a)=>s+assetCost(a),0), e=t.assetsQAR-c;
-        return `<div class="sub">${act.length} active · cost ${fmt(c,'QAR')}</div>${Math.abs(e)>0.5?`<div class="pl ${e>=0?'up':'down'}">${e>=0?'▲':'▼'} ${fmt(Math.abs(e),'QAR')} target</div>`:''}`; })()}
-    </div>
     <div class="acard tap" onclick="openCars()">
       <div class="ic">🚗</div><div class="nm">Cars receivable</div>
       <div class="bal" style="color:var(--green)">${fmt(t.carsRecvQAR,'QAR')}</div>
@@ -508,6 +502,12 @@ function render(){
       ${(()=>{ const b=monthBalanceDiff(curMonth()); return b
         ? `<div class="bal" style="color:${b.diff>=0?'var(--green)':'var(--red)'}">${b.diff>=0?'+':'−'}${fmt(Math.abs(b.diff),'QAR')}</div><div class="sub">${monthLabel(curMonth())} · ${b.kind}</div>`
         : `<div class="bal" style="color:var(--muted)">—</div><div class="sub">building history…</div>`; })()}
+    </div>
+    <div class="acard tap" onclick="openAssets()">
+      <div class="ic">🚘</div><div class="nm">Assets</div>
+      <div class="bal">${fmt(t.assetsQAR,'QAR')}</div>
+      ${(()=>{ const act=(S.assets||[]).filter(a=>a.status!=='sold'), c=act.reduce((s,a)=>s+assetCost(a),0), e=t.assetsQAR-c;
+        return `<div class="sub">${act.length} active · cost ${fmt(c,'QAR')}</div>${Math.abs(e)>0.5?`<div class="pl ${e>=0?'up':'down'}">${e>=0?'▲':'▼'} ${fmt(Math.abs(e),'QAR')} target</div>`:''}`; })()}
     </div>`;
 
   // cars list — pending (receivable) first, then newest date first
