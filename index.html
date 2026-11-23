@@ -315,7 +315,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-11-23-asset-exp-tick';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-11-23-asset-car15k';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -794,8 +794,8 @@ function migrateFixedCat(){
   S.settings.fixedCatV1=true;
 }
 /* move a booked bank expense out of expenses because it belongs to an asset (the bank balance is not touched) */
-function linkAssetTxn(x,a){ if(!x||!(x.dir<0)) return false; x.subOrig=x.sub; x.dir=0; x.assetId=a.id; x.sub='Moved to asset · '+a.name; return true; }
-function unlinkAssetTxn(id){ const x=S.txns.find(t=>t.id===id); if(!x||!x.assetId) return; x.dir=-1; x.sub=x.subOrig||x.sub; delete x.assetId; delete x.subOrig; }
+function linkAssetTxn(x,a){ if(!x||!(x.dir<0||(x.notExpense&&!x.assetId))) return false; x.subOrig=x.subOrig||x.sub; x.dir=0; x.assetId=a.id; x.sub='Moved to asset · '+a.name; return true; }
+function unlinkAssetTxn(id){ const x=S.txns.find(t=>t.id===id); if(!x||!x.assetId) return; delete x.assetId; if(x.notExpense){ x.dir=0; x.sub=(x.subOrig||x.sub)+' · not an expense'; return; } x.dir=-1; x.sub=x.subOrig||x.sub; delete x.subOrig; }
 function migrateAssetsV1(){
   if(S.settings.assetsV1) return; S.settings.assetsV1=true; S.assets=S.assets||[];
   if(!S.assets.some(a=>a.id==='asset-challenger')){
@@ -809,6 +809,22 @@ function migrateAssetsV1(){
   }
   const f=S.txns.find(t=>t.id==='ic1qd6aa');   // 15,000 Fawran, 23 Nov 2026: user said it is not an expense
   if(f&&f.dir<0){ f.subOrig=f.sub; f.dir=0; f.notExpense=true; f.sub=(f.sub||'')+' · not an expense'; }
+  save();
+}
+function migrateAssetsV2(){   // the 15,000 Fawran of 23 Nov 2026 is a car's cost (user): an asset, never an expense
+  if(S.settings.assetsV2) return; S.settings.assetsV2=true; S.assets=S.assets||[];
+  const f=S.txns.find(t=>t.id==='ic1qd6aa');
+  if(f && !f.assetId && !S.assets.some(a=>a.id==='asset-car-2311')){
+    const a={id:'asset-car-2311',name:'Car (23 Nov)',price:15000,date:'2026-11-23',target:null,status:'active',links:[],costs:[]};
+    f.notExpense=true; f.subOrig=(f.subOrig||f.sub||'').replace(' · not an expense','');
+    if(linkAssetTxn(f,a)) a.links.push(f.id);
+    S.assets.push(a);
+  }
+  const ch=S.assets.find(a=>a.id==='asset-challenger');   // Dodge insurance (QIC 600, 2 Nov 2026) belongs to the Challenger's cost (user)
+  if(ch && ch.status!=='sold' && !(ch.costs||[]).some(k=>k.id==='ch-qic')){
+    const q=S.txns.find(t=>t.id==='i0tb2rhs'); const linked=linkAssetTxn(q,ch);
+    ch.costs=ch.costs||[]; ch.costs.push({id:'ch-qic',label:'QIC insurance',amount:600,date:'2026-11-02',txnId:linked?'i0tb2rhs':null});
+  }
   save();
 }
 function migratePastFixedV1(){
@@ -2358,7 +2374,7 @@ async function syncCloud(opts){
     if(d.state && ((d.updatedAt||0) > (S.updatedAt||0) || localEmpty)){        // remote is newer → adopt
       S={...clone(DEFAULT),...d.state}; localStorage.setItem(LS,JSON.stringify(S));
       retitleOldSms();                                        // re-title merchants on the freshly-adopted data
-      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); migrateFxV2(); migratePastFixedV1(); migrateAssetsV1(); runAutoRecurring();   // re-apply one-time migrations to adopted data
+      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); migrateFxV2(); migratePastFixedV1(); migrateAssetsV1(); migrateAssetsV2(); runAutoRecurring();   // re-apply one-time migrations to adopted data
       render();
     }
     const ri=await fetch(base+'/inbox',{headers:cloudHeaders()});
@@ -3058,7 +3074,7 @@ migrateEsraaSplit();      // Shopping↔Esraa rename split (once)
 migrateUaeRate();         // UAE default car revenue 850 → 500 (once)
 migrateCatMemory();       // re-key learned categories to the smarter merchant keys (once)
 runAutoSalary();          // add this month's salary automatically if due
-seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); migrateFxV2(); migratePastFixedV1(); migrateAssetsV1(); runAutoRecurring();   // fixed monthly expenses + the ثابت كل شهر category
+seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); migrateFxV2(); migratePastFixedV1(); migrateAssetsV1(); migrateAssetsV2(); runAutoRecurring();   // fixed monthly expenses + the ثابت كل شهر category
 recordDailyBalance();     // snapshot today's total balance for the monthly Difference field
 render();
 refreshFX();              // silent live FX on open
