@@ -315,7 +315,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-11-23-asset-breakdown';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-11-23-liquid';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -431,7 +431,7 @@ function render(){
   document.getElementById('backupBanner').innerHTML = '';
 
   document.getElementById('heroStats').innerHTML =
-    `<div class="st"><div class="k">TOTAL ASSETS</div><div class="v a">${fmt(t.assets,'QAR')}</div></div>`+
+    `<div class="st"><div class="k">TOTAL ASSETS</div><div class="v a">${fmt(t.assets,'QAR')}</div><div style="font-size:11px;color:var(--muted);font-weight:600;margin-top:3px">LIQUID <span style="color:var(--text);font-weight:800">${fmt(t.assets-t.assetsQAR,'QAR')}</span></div></div>`+   // liquid = total assets without the Assets section (things bought to resell)
     `<div class="st"><div class="k">YOU OWE</div><div class="v l">${fmt(t.liabilities,'QAR')}</div><div class="more">tap for details ›</div></div>`;
 
   document.getElementById('rateLine').innerHTML =
