@@ -315,7 +315,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-11-23-assets-card-pos';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-11-23-move-to-asset';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -455,7 +455,7 @@ function render(){
     ACCTS.map(a=>{ const bal=S.accounts[a.key]||0; return `
     <div class="acard tap" onclick="openAccount('${a.key}')">
       <div class="between"><div class="ic">${a.ic}</div><div class="editpin">✎</div></div><div class="nm">${a.name}</div>
-      <div class="bal">${fmt(bal,a.cur)}</div><div class="sub">${a.cur==='QAR'?a.sub:'≈ '+fmt(toQAR(bal,a.cur),'QAR')}</div>
+      <div class="bal">${a.cur==='QAR'?fmt(bal,a.cur):fmt(toQAR(bal,a.cur),'QAR')}</div><div class="sub">${a.cur==='QAR'?a.sub:fmt(bal,a.cur)}</div>
     </div>`; }).join('')+`
     <div class="acard tap" onclick="openGold()">
       <div class="ic">🪙</div><div class="nm">Gold (21k)</div>
@@ -2004,6 +2004,7 @@ function editTxn(id){
    <label class="f">Detail</label><input id="etDet" value="${esc(x.edit.detail||'')}">
    <label class="f">Date</label><input type="date" id="etDate" value="${x.date}">
    <button class="btn" onclick="saveEditTxn('${id}')">Save changes</button>
+   ${x.edit.kind==='expense'&&x.dir<0?`<button class="btn ghost" onclick="openMoveToAsset('${id}')">🚘 Move to assets</button>`:''}
    <button class="btn red" onclick="delTxn('${id}')">Delete this entry</button>
   `);
 }
@@ -2084,6 +2085,40 @@ function asFill(sel,amtId,labelId){
   document.getElementById(amtId).value=Math.round(toQAR(x.amount,x.currency)*100)/100;
   const cur=document.getElementById(amtId+'Cur'); if(cur) cur.value='QAR';
   const l=labelId&&document.getElementById(labelId); if(l&&!l.value) l.value=(displayTitle(x)||x.title||'').replace(/\s+/g,' ').slice(0,40);
+}
+/* move one expense out of monthly expenses into an asset (as an extra cost, or as a new asset's purchase). Bank balances are not changed. */
+function openMoveToAsset(id){
+  const x=S.txns.find(t=>t.id===id); if(!x||!(x.dir<0)) return toast('Only an expense can be moved');
+  const back=_sheetBack; const amt=Math.round(toQAR(x.amount,x.currency)*100)/100, title=(displayTitle(x)||x.title||'Expense').replace(/\s+/g,' ').trim();
+  const active=(S.assets||[]).filter(a=>a.status!=='sold');
+  openSheet(`
+   <h2>🚘 Move to assets</h2>
+   <div class="kv"><span>${esc(title)} <span class="dim" style="font-size:11px">${fmtDate(x.date)}</span></span><span>${fmt(amt,'QAR',amt%1?2:0)}</span></div>
+   <p class="hint">It leaves monthly expenses and counts in the asset's cost. Your bank balance is not changed.</p>
+   <label class="f">Add it as a cost to</label>
+   <div class="list">${active.length?active.map(a=>`<div class="item tap" onclick="moveTxnToAsset('${id}','${a.id}')"><div class="em">🚘</div><div class="mid"><div class="t">${esc(a.name)}</div><div class="s">cost now ${fmt(assetCost(a),'QAR')} → ${fmt(assetCost(a)+amt,'QAR')}</div></div><div class="s" style="color:var(--accent)">add ›</div></div>`).join(''):'<div class="empty">No active assets yet.</div>'}</div>
+   <label class="f" style="margin-top:14px">Or make it a new asset (this is its purchase cost)</label>
+   <input id="mtaName" placeholder="Asset name, e.g. Toyota Camry" value="${esc(title.slice(0,40))}">
+   <button class="btn" onclick="moveTxnToNewAsset('${id}')">➕ Create asset from this expense</button>
+   <button class="btn ghost" onclick="mtaBack()">← Back</button>
+  `);
+  _sheetBack=back;
+}
+function mtaBack(){ if(_sheetBack) backToList(); else if(window._expMo) openExpMonth(window._expMo); else closeSheet(); }
+function mtaDone(msg){ const back=_sheetBack; save(); _sheetBack=back; mtaBack(); toast(msg); }
+function moveTxnToAsset(id,aid){
+  const x=S.txns.find(t=>t.id===id), a=(S.assets||[]).find(v=>v.id===aid); if(!x||!a||a.status==='sold') return;
+  const amt=Math.round(toQAR(x.amount,x.currency)*100)/100, label=(displayTitle(x)||x.title||'Extra cost').replace(/\s+/g,' ').trim().slice(0,40);
+  if(!linkAssetTxn(x,a)) return toast('Only an expense can be moved');
+  a.costs=a.costs||[]; a.costs.push({id:uid(),label,amount:amt,date:x.date||today(),txnId:x.id});
+  mtaDone('Moved to '+a.name);
+}
+function moveTxnToNewAsset(id){
+  const x=S.txns.find(t=>t.id===id); if(!x) return; const name=document.getElementById('mtaName').value.trim(); if(!name) return toast('Enter a name');
+  const a={id:uid(),name,price:Math.round(toQAR(x.amount,x.currency)*100)/100,date:x.date||today(),target:null,status:'active',links:[],costs:[]};
+  if(!linkAssetTxn(x,a)) return toast('Only an expense can be moved');
+  a.links.push(x.id); S.assets=S.assets||[]; S.assets.push(a);
+  mtaDone('Asset created: '+name);
 }
 function openAssets(){
   _sheetBack=openAssets;
@@ -2838,7 +2873,7 @@ function pickCat(id){
   openSheet(`
    <h2>🏷️ Category</h2>
    <p class="hint" style="margin-top:0">${esc(displayTitle(x))} · ${fmt(x.amount,x.currency)} — now <b>${esc(cur)}</b></p>
-   <div class="list">${list.map((c,i)=>`<div class="item tap" onclick="setTxnCat('${id}',${i})"><div class="em">${c===cur?'✅':'🏷️'}</div><div class="mid"><div class="t">${esc(c)}</div></div></div>`).join('')}</div>
+   <div class="list"><div class="item tap" onclick="openMoveToAsset('${id}')"><div class="em">🚘</div><div class="mid"><div class="t">Move to assets</div><div class="s">not an expense: part of an asset's cost</div></div></div>${list.map((c,i)=>`<div class="item tap" onclick="setTxnCat('${id}',${i})"><div class="em">${c===cur?'✅':'🏷️'}</div><div class="mid"><div class="t">${esc(c)}</div></div></div>`).join('')}</div>
   `);
 }
 function setTxnCat(id,i){
