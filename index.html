@@ -256,6 +256,16 @@ function isGenRev(x){ return x.dir>0 && x.edit && x.edit.kind==='income' && !x.r
 function genRevByMonth(){ const m={}; S.txns.filter(isGenRev).forEach(x=>{ const mo=(x.date||today()).slice(0,7); if(!m[mo])m[mo]={total:0,items:[]}; m[mo].total+=toQAR(x.amount,x.currency); m[mo].items.push(x); }); return m; }
 function genRevForMonth(mo){ const g=genRevByMonth()[mo]; return g?g.total:0; }
 function genRevToDay(mo,dayCap){ return S.txns.filter(x=>isGenRev(x)&&(x.date||'').slice(0,7)===mo&&+(x.date||'').slice(8,10)<=dayCap).reduce((s,x)=>s+toQAR(x.amount,x.currency),0); }
+/* ASSETS bought to resell. All amounts are QAR. The app never changes a bank balance for them. */
+function assetCost(a){ return (+a.price||0)+(a.costs||[]).reduce((s,c)=>s+(+c.amount||0),0); }
+function assetValue(a){ if(a.status==='sold') return 0; const t=+a.target||0; return t>0?t:assetCost(a); }   // target price if set, otherwise total cost
+function assetsValueQAR(){ return (S.assets||[]).reduce((s,a)=>s+assetValue(a),0); }
+function assetPL(a){ return (+a.soldPrice||0)-assetCost(a); }
+function assetPLByMonth(){ const m={}; (S.assets||[]).filter(a=>a.status==='sold').forEach(a=>{ const mo=(a.soldDate||today()).slice(0,7); if(!m[mo])m[mo]={total:0,items:[]}; m[mo].total+=assetPL(a); m[mo].items.push(a); }); return m; }
+function assetPLForMonth(mo){ const g=assetPLByMonth()[mo]; return g?g.total:0; }
+function assetPLToDay(mo,dayCap){ return (S.assets||[]).filter(a=>a.status==='sold'&&(a.soldDate||'').slice(0,7)===mo&&+(a.soldDate||'').slice(8,10)<=dayCap).reduce((s,a)=>s+assetPL(a),0); }
+/* net-worth history, adjusted for assets I already owned when they were first added (so adding them is not shown as a gain) */
+function nwHist(){ const nw=S.settings.nwByDay||{}, adj=S.settings.nwOpeningAdj||[]; if(!adj.length) return nw; const o={}; Object.keys(nw).forEach(d=>{ o[d]=nw[d]+adj.reduce((s,a)=>s+(d<a.before?(+a.amount||0):0),0); }); return o; }
 function carRevByMonth(){
   const m={};
   const slot=mo=>{ if(!m[mo])m[mo]={total:0,count:0,cars:[],entries:[]}; return m[mo]; };
@@ -277,7 +287,7 @@ const DEFAULT={
              exitItems:[{name:'Nissan Patrol',value:25000},{name:'Cadillac Escalade',value:10000},{name:'Furniture',value:4000}] },
   updatedAt:0,
   accounts:{ qDebit:0, qCredit:0, qPrepaid:0, jDebit:0, cash:0 },
-  gold:[], cars:[], pr:[], txns:[], salary:null, carRevEntries:[], sellers:[]
+  gold:[], cars:[], pr:[], txns:[], salary:null, carRevEntries:[], sellers:[], assets:[]
 };
 /* migrate old 2-account data (main→qDebit, jordan→jDebit) to the new 3-card model */
 function migrate(s){
@@ -302,7 +312,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-11-16-cash-fixed';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-11-23-assets';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -330,7 +340,8 @@ function netWorthOf(st){
   const cars=(st.cars||[]).filter(c=>c.status==='receivable'||(c.status==='inspection'&&!c.inspReceived)).reduce((x,c)=>x+q(c.amount,c.currency),0);
   const recv=(st.pr||[]).filter(p=>p.type==='receivable').reduce((x,p)=>x+q(p.amount,p.currency),0);
   const pay=(st.pr||[]).filter(p=>p.type==='payable').reduce((x,p)=>x+q(p.amount,p.currency),0);
-  return Math.round(acc+gold+cars+recv-pay);
+  const own=(st.assets||[]).filter(a=>a.status!=='sold').reduce((x,a)=>x+((+a.target>0)?+a.target:(+a.price||0)+(a.costs||[]).reduce((t,c)=>t+(+c.amount||0),0)),0);
+  return Math.round(acc+gold+cars+recv-pay+own);
 }
 /* one-time: back-fill net-worth history from the daily cloud backups (last 30 days) */
 async function seedNwHistory(){
@@ -344,7 +355,7 @@ async function seedNwHistory(){
 }
 /* change in total account balances across a month (first day → last day) */
 function monthBalanceDiff(mo){
-  const nw=S.settings.nwByDay||{}, useNw=Object.keys(nw).some(d=>d.slice(0,7)===mo);
+  const nw=nwHist(), useNw=Object.keys(nw).some(d=>d.slice(0,7)===mo);
   const bd=useNw?nw:(S.settings.balByDay||{}); const dates=Object.keys(bd).sort(); if(!dates.length) return null;
   const inMo=dates.filter(d=>d.slice(0,7)===mo);
   const closing = mo===curMonth() ? (useNw?Math.round(totals().net):Math.round(accountsTotalQAR())) : (inMo.length?bd[inMo[inMo.length-1]]:null);
@@ -394,10 +405,11 @@ function totals(){
   const receivables=S.pr.filter(p=>p.type==='receivable').reduce((s,p)=>s+toQAR(p.amount,p.currency),0);
   const payables=S.pr.filter(p=>p.type==='payable').reduce((s,p)=>s+toQAR(p.amount,p.currency),0);
   const prNet=receivables-payables;
-  const assets=accTotal+goldQAR+carsRecvQAR+receivables;   // everything you own / are owed
+  const assetsQAR=assetsValueQAR();                        // assets bought to resell (target price, or total cost)
+  const assets=accTotal+goldQAR+carsRecvQAR+receivables+assetsQAR;   // everything you own / are owed
   const liabilities=payables;                              // what you owe
   const net=assets-liabilities;                            // net worth
-  return {accQAR,accTotal,grams,goldQAR,carsRecvQAR,receivables,payables,prNet,assets,liabilities,net};
+  return {accQAR,accTotal,grams,goldQAR,carsRecvQAR,receivables,payables,prNet,assetsQAR,assets,liabilities,net};
 }
 
 /* ---------------- RENDER ---------------- */
@@ -405,7 +417,7 @@ function render(){
   _sheetBack=null;   // on the home screen, a message popup's Close returns home
   const t=totals();
   { // net worth + change vs the same day last month (from the daily net-worth history)
-    const nw=S.settings.nwByDay||{}; const target=monthShift(curMonth(),-1)+'-'+today().slice(8,10);
+    const nw=nwHist(); const target=monthShift(curMonth(),-1)+'-'+today().slice(8,10);
     const dates=Object.keys(nw).filter(d=>d<=target&&d>=monthShift(curMonth(),-1)+'-01').sort(); const ref=dates.length?dates[dates.length-1]:null;
     let line='';
     if(ref){ const diff=Math.round(t.net)-nw[ref]; const col=diff>0?'var(--green)':(diff<0?'var(--red)':'var(--muted)');
@@ -429,7 +441,8 @@ function render(){
   const goldPL = t.goldQAR - S.gold.reduce((s,g)=>s+toQAR(g.buyJOD,'JOD'),0);
   const cmCarData = carRevByMonth()[curMonth()]||{total:0,count:0};
   const cmGen = genRevForMonth(curMonth());
-  const cmRev = cmCarData.total + cmGen;
+  const cmAssetPL = assetPLForMonth(curMonth());
+  const cmRev = cmCarData.total + cmGen + cmAssetPL;
   const cmCount = cmCarData.count;
   const _cmExpOv=(S.settings.expOverride||{})[curMonth()];
   const cmExp = (_cmExpOv!=null && _cmExpOv!=='') ? (+_cmExpOv||0)
@@ -447,6 +460,12 @@ function render(){
       <div class="sub">${grams.toLocaleString('en',{maximumFractionDigits:2})} g</div>
       ${grams>0?`<div class="pl ${goldPL>=0?'up':'down'}">${goldPL>=0?'▲':'▼'} ${fmt(Math.abs(goldPL),'QAR')}</div>`:''}
     </div>
+    <div class="acard tap" onclick="openAssets()">
+      <div class="ic">🚘</div><div class="nm">Assets</div>
+      <div class="bal">${fmt(t.assetsQAR,'QAR')}</div>
+      ${(()=>{ const act=(S.assets||[]).filter(a=>a.status!=='sold'), c=act.reduce((s,a)=>s+assetCost(a),0), e=t.assetsQAR-c;
+        return `<div class="sub">${act.length} active · cost ${fmt(c,'QAR')}</div>${Math.abs(e)>0.5?`<div class="pl ${e>=0?'up':'down'}">${e>=0?'▲':'▼'} ${fmt(Math.abs(e),'QAR')} target</div>`:''}`; })()}
+    </div>
     <div class="acard tap" onclick="openCars()">
       <div class="ic">🚗</div><div class="nm">Cars receivable</div>
       <div class="bal" style="color:var(--green)">${fmt(t.carsRecvQAR,'QAR')}</div>
@@ -454,9 +473,9 @@ function render(){
     </div>
     <div class="acard tap" onclick="openCarRev()">
       <div class="ic">📤</div><div class="nm">Rev from cars</div>
-      <div class="bal" style="color:var(--green)">${fmt(cmRev,'QAR')}</div>
-      <div class="sub">${monthLabel(curMonth())} · ${cmCount} car${cmCount!==1?'s':''}${cmGen?` · <span style="color:var(--green)">incl. ${fmt(cmGen,'QAR')} general rev</span>`:''}</div>
-      ${(()=>{ const day=Math.max(1,+today().slice(8,10)); const a=carRevToDay(curMonth(),day)+genRevToDay(curMonth(),day), b=carRevToDay(monthShift(curMonth(),-1),day)+genRevToDay(monthShift(curMonth(),-1),day);
+      <div class="bal" style="color:${cmRev>=0?'var(--green)':'var(--red)'}">${fmt(cmRev,'QAR')}</div>
+      <div class="sub">${monthLabel(curMonth())} · ${cmCount} car${cmCount!==1?'s':''}${cmGen?` · <span style="color:var(--green)">incl. ${fmt(cmGen,'QAR')} general rev</span>`:''}${cmAssetPL?` · <span style="color:${cmAssetPL>0?'var(--green)':'var(--red)'}">incl. ${cmAssetPL>0?'+':'−'}${fmt(Math.abs(cmAssetPL),'QAR')} asset ${cmAssetPL>0?'profit':'loss'}</span>`:''}</div>
+      ${(()=>{ const day=Math.max(1,+today().slice(8,10)); const a=carRevToDay(curMonth(),day)+genRevToDay(curMonth(),day)+assetPLToDay(curMonth(),day), b=carRevToDay(monthShift(curMonth(),-1),day)+genRevToDay(monthShift(curMonth(),-1),day)+assetPLToDay(monthShift(curMonth(),-1),day);
         if(!(b>0)) return ''; const d=Math.round((a-b)/b*100); const col=d>=5?'var(--green)':(d<=-5?'var(--red)':'var(--amber)');
         return `<div class="sub" style="color:${col}">${d>0?'▲':(d<0?'▼':'=')} ${Math.abs(d)}% vs last month · to day ${day}</div>`; })()}
     </div>
@@ -468,7 +487,7 @@ function render(){
     <div class="acard tap" onclick="openSavings()">
       <div class="ic">🐖</div><div class="nm">Savings this month</div>
       <div class="bal" style="color:${cmSavings>=0?'var(--green)':'var(--red)'}">${fmt(cmSavings,'QAR')}</div>
-      <div class="sub">salary + car rev + general rev − exp</div>
+      <div class="sub">salary + all rev − exp</div>
     </div>
     <div class="acard tap" onclick="openFixedMonths()">
       <div class="ic">📌</div><div class="nm">Monthly fixed avg</div>
@@ -770,6 +789,24 @@ function migrateFixedCat(){
   (S.settings.recurring||[]).forEach(r=>r.cat=FIXED_CAT);
   S.settings.avgExclude={cats:[FIXED_CAT,'Rent'],words:[]};   // avg/day leaves out the whole fixed category (CliQ now lives there)
   S.settings.fixedCatV1=true;
+}
+/* move a booked bank expense out of expenses because it belongs to an asset (the bank balance is not touched) */
+function linkAssetTxn(x,a){ if(!x||!(x.dir<0)) return false; x.subOrig=x.sub; x.dir=0; x.assetId=a.id; x.sub='Moved to asset · '+a.name; return true; }
+function unlinkAssetTxn(id){ const x=S.txns.find(t=>t.id===id); if(!x||!x.assetId) return; x.dir=-1; x.sub=x.subOrig||x.sub; delete x.assetId; delete x.subOrig; }
+function migrateAssetsV1(){
+  if(S.settings.assetsV1) return; S.settings.assetsV1=true; S.assets=S.assets||[];
+  if(!S.assets.some(a=>a.id==='asset-challenger')){
+    const a={id:'asset-challenger',name:'Challenger',price:12000,date:'2026-07-30',target:null,status:'active',links:[],costs:[]};
+    const rows=[['Fast Fix Service',4500,'2026-08-19','ik5zjsub'],['Fawran 66252484',500,'2026-08-11','iy5hzmfs'],['Fawran 33202130',120,'2026-08-05','iodcamd7'],['Al Sahrawi Technical',450,'2026-08-03','ibyse4n5'],['Teyseer Petrol Station',246,'2026-08-03','iq8zhka7'],['Perfect Fix for Car',630,'2026-08-03','ie4h4pgm'],['Car barkdon',100,'2026-08-03','i5dn56td'],['بركدون دودج',120,'2026-10-10','iej6paj3']];
+    rows.forEach(([label,amount,date,tid],i)=>{ const linked=linkAssetTxn(S.txns.find(t=>t.id===tid),a); a.costs.push({id:'ch'+i,label,amount,date,txnId:linked?tid:null}); });
+    if(linkAssetTxn(S.txns.find(t=>t.id==='ipcpozb4'),a)) a.links.push('ipcpozb4');   // "Car purshase dodge": part of the 12,000 purchase
+    S.assets.push(a);
+    S.settings.nwOpeningAdj=[...(S.settings.nwOpeningAdj||[]),{before:today(),amount:assetCost(a)}];   // already owned: adding it is not a gain
+    S.settings.exitItems=(S.settings.exitItems||[]).filter(i=>!/challenger|escalade/i.test(i.name||''));   // now inside net worth, so the Exit plan must not add it again
+  }
+  const f=S.txns.find(t=>t.id==='ic1qd6aa');   // 15,000 Fawran, 23 Nov 2026: user said it is not an expense
+  if(f&&f.dir<0){ f.subOrig=f.sub; f.dir=0; f.notExpense=true; f.sub=(f.sub||'')+' · not an expense'; }
+  save();
 }
 function migratePastFixedV1(){
   if(S.settings.pastFixedV1) return; S.settings.pastFixedV1=true; let n=0;
@@ -1518,33 +1555,35 @@ function shareCarsWhatsApp(){
 
 /* ---------------- CAR EXPORT REVENUE ---------------- */
 function openCarRev(){
-  const byM=carRevByMonth(), gen=genRevByMonth();
-  const months=[...new Set([...Object.keys(byM),...Object.keys(gen)])].sort().reverse();
-  const grandCars=months.reduce((s,mo)=>s+(byM[mo]?byM[mo].total:0),0), grandGen=months.reduce((s,mo)=>s+(gen[mo]?gen[mo].total:0),0), grand=grandCars+grandGen;
-  const bm=mo=>byM[mo]||{total:0,count:0}, gm=mo=>gen[mo]?gen[mo].total:0;
+  const byM=carRevByMonth(), gen=genRevByMonth(), apl=assetPLByMonth();
+  const months=[...new Set([...Object.keys(byM),...Object.keys(gen),...Object.keys(apl)])].sort().reverse();
+  const grandCars=months.reduce((s,mo)=>s+(byM[mo]?byM[mo].total:0),0), grandGen=months.reduce((s,mo)=>s+(gen[mo]?gen[mo].total:0),0), grandAsset=months.reduce((s,mo)=>s+(apl[mo]?apl[mo].total:0),0), grand=grandCars+grandGen+grandAsset;
+  const bm=mo=>byM[mo]||{total:0,count:0}, gm=mo=>gen[mo]?gen[mo].total:0, am=mo=>apl[mo]?apl[mo].total:0;
   openSheet(`
    <h2>📤 Revenue</h2>
    <div class="between" style="margin-bottom:8px"><p class="hint" style="margin:0">Each exported car earns: 🇦🇪 UAE ${fmt(S.settings.carRevUAE,'QAR')} · 🇶🇦 Qatar ${fmt(S.settings.carRevQatar,'QAR')}.</p><a onclick="editCarRates()" style="color:var(--accent);font-size:12px;white-space:nowrap">✎ Rates</a></div>
    <div class="row" style="gap:8px"><button class="btn" onclick="openAddCarRev()">➕ Cars (by count)</button><button class="btn ghost" onclick="openRevenue()">➕ General revenue</button></div>
    <div class="kv" style="margin-top:12px"><span style="font-weight:800">All-time total</span><span style="font-weight:800;color:var(--green)">${fmt(grand,'QAR')}</span></div>
-   <div class="kv"><span class="dim">🚗 cars ${fmt(grandCars,'QAR')} · 💵 general ${fmt(grandGen,'QAR')}</span><span></span></div>
+   <div class="kv"><span class="dim">🚗 cars ${fmt(grandCars,'QAR')} · 💵 general ${fmt(grandGen,'QAR')}${grandAsset?' · 🚘 assets '+fmt(grandAsset,'QAR'):''}</span><span></span></div>
    <div class="list" style="margin-top:10px">${months.length? months.map(mo=>`
      <div class="item tap" onclick="openCarRevMonth('${mo}')"><div class="em">📅</div>
      <div class="mid"><div class="t">${monthLabel(mo)}${mo===curMonth()?' <span class="badge paid">this month</span>':''}</div>
-     <div class="s">${bm(mo).count} car${bm(mo).count!==1?'s':''}${gm(mo)?' · general '+fmt(gm(mo),'QAR'):''}</div></div>
-     <div style="text-align:right"><div class="amt pos">${fmt(bm(mo).total+gm(mo),'QAR')}</div><div class="s" style="color:var(--accent)">view ›</div></div></div>`).join('')
+     <div class="s">${bm(mo).count} car${bm(mo).count!==1?'s':''}${gm(mo)?' · general '+fmt(gm(mo),'QAR'):''}${am(mo)?' · assets '+fmt(am(mo),'QAR'):''}</div></div>
+     <div style="text-align:right"><div class="amt ${bm(mo).total+gm(mo)+am(mo)>=0?'pos':'neg'}">${fmt(bm(mo).total+gm(mo)+am(mo),'QAR')}</div><div class="s" style="color:var(--accent)">view ›</div></div></div>`).join('')
      : '<div class="empty">No cars yet — add cars and their monthly revenue appears here.</div>'}</div>
   `);
 }
 function openCarRevMonth(mo){
   const g=carRevByMonth()[mo]||{total:0,count:0,cars:[]};
   const gen=genRevByMonth()[mo]||{total:0,items:[]};
+  const apl=assetPLByMonth()[mo]||{total:0,items:[]};
   _sheetBack=()=>openCarRevMonth(mo);   // editing/deleting a general-revenue entry returns here
   openSheet(`
    <h2>📤 ${monthLabel(mo)}</h2>
-   <div class="kv"><span style="font-weight:800">Revenue this month</span><span style="font-weight:800;color:var(--green)">${fmt(g.total+gen.total,'QAR')}</span></div>
+   <div class="kv"><span style="font-weight:800">Revenue this month</span><span style="font-weight:800;color:${g.total+gen.total+apl.total>=0?'var(--green)':'var(--red)'}">${fmt(g.total+gen.total+apl.total,'QAR')}</span></div>
    <div class="kv"><span>🚗 From cars${g.override?' <span class="badge">manual</span>':''}</span><span style="color:var(--green)">${fmt(g.total,'QAR')}</span></div>
    <div class="kv"><span>💵 General revenue</span><span style="color:var(--green)">${fmt(gen.total,'QAR')}</span></div>
+   ${apl.items.length?`<div class="kv tap" onclick="openAssets()"><span>🚘 Asset ${apl.total>=0?'profit':'loss'}</span><span style="color:${apl.total>=0?'var(--green)':'var(--red)'}">${apl.total>=0?'+':'−'}${fmt(Math.abs(apl.total),'QAR')}</span></div>`:''}
    <div class="kv"><span>Cars exported</span><span>${g.count}</span></div>
    <label class="f">✎ Set month total manually (QAR)</label>
    <input id="carRevOv" type="text" inputmode="decimal" value="${(S.settings.carRevOverride||{})[mo]!=null?(S.settings.carRevOverride||{})[mo]:''}" placeholder="leave blank to auto-total">
@@ -1561,6 +1600,7 @@ function openCarRevMonth(mo){
        <div class="s">manual entry · ${fmtDate(e.date)}</div></div>
        <div style="text-align:right"><div class="amt pos">${fmt(e.count*carRate(e.country),'QAR')}</div>
        <div class="row" style="gap:8px;justify-content:flex-end"><button class="del" style="color:var(--accent)" onclick="editCarRevEntry('${e.id}','${mo}')">Edit</button><button class="del" onclick="delCarRevEntry('${e.id}','${mo}')">Del</button></div></div></div>`).join('')}</div>
+   ${apl.items.length?`<label class="f" style="margin-top:14px">🚘 Assets sold</label><div class="list">${apl.items.map(a=>{ const pl=assetPL(a); return `<div class="item tap" onclick="openAsset('${a.id}')"><div class="em">🚘</div><div class="mid"><div class="t">${esc(a.name)}</div><div class="s">sold ${fmt(a.soldPrice,'QAR')} · cost ${fmt(assetCost(a),'QAR')} · ${fmtDate(a.soldDate)}</div></div><div class="amt ${pl>=0?'pos':'neg'}">${pl>=0?'+':'−'}${fmt(Math.abs(pl),'QAR')}</div></div>`; }).join('')}</div>`:''}
    <label class="f" style="margin-top:14px">💵 General revenue (not from cars)</label>
    <div class="list">${gen.items.length? gen.items.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(x=>`
      <div class="item"><div class="em">💵</div><div class="mid">
@@ -1985,6 +2025,7 @@ function openBreakdown(){
    <p class="hint" style="margin-top:0">Tap any row with ✎ to edit that number.</p>
    ${ACCTS.map(a=>row(a.ic+' '+a.name, t.accQAR[a.key], a.cur==='QAR'?'':fmt(S.accounts[a.key]||0,a.cur), "openAccount('"+a.key+"')")).join('')}
    ${row('🪙 Gold (21k)',t.goldQAR, t.grams.toLocaleString('en',{maximumFractionDigits:2})+' g',"openGold()")}
+   ${row('🚘 Assets',t.assetsQAR,(S.assets||[]).filter(a=>a.status!=='sold').length+' active',"openAssets()")}
    ${row('🚗 Cars receivable',t.carsRecvQAR, '≈ '+fmt(fromQAR(t.carsRecvQAR,'JOD'),'JOD'),"openCars()")}
    ${row('📥 Owed to me',t.receivables,'',"openKashf('receivable')")}
    <div class="kv" style="border-top:2px solid var(--line);margin-top:4px"><span style="font-weight:800">Total assets</span><span style="font-weight:800;color:var(--green)">${fmt(t.assets,'QAR')}</span></div>
@@ -2011,6 +2052,168 @@ function openSettings(){
    <button class="btn ghost" onclick="openCloud()">☁️ Cloud sync ${cloudBase()?'· on':''}</button>
    <button class="btn ghost" onclick="openBackup()">💾 Backup &amp; restore</button>
   `);
+}
+/* ---------------- ASSETS (bought to resell) ---------------- */
+function assetTxnOptions(){
+  const from=monthShift(curMonth(),-3)+'-01';
+  const list=S.txns.filter(x=>isExp(x)&&(x.date||'')>=from).sort((a,b)=>((b.date||'')+(b.time||'')).localeCompare((a.date||'')+(a.time||''))).slice(0,120);
+  return `<option value="">None</option>`+list.map(x=>`<option value="${x.id}">${fmtDate(x.date)} · ${esc((displayTitle(x)||x.title||'').replace(/\s+/g,' ').slice(0,24))} · ${fmt(toQAR(x.amount,x.currency),'QAR',toQAR(x.amount,x.currency)%1?2:0)}</option>`).join('');
+}
+function asFill(sel,amtId,labelId){
+  const x=S.txns.find(t=>t.id===sel.value); if(!x) return;
+  document.getElementById(amtId).value=Math.round(toQAR(x.amount,x.currency)*100)/100;
+  const cur=document.getElementById(amtId+'Cur'); if(cur) cur.value='QAR';
+  const l=labelId&&document.getElementById(labelId); if(l&&!l.value) l.value=(displayTitle(x)||x.title||'').replace(/\s+/g,' ').slice(0,40);
+}
+function openAssets(){
+  _sheetBack=openAssets;
+  const all=S.assets||[], active=all.filter(a=>a.status!=='sold'), sold=all.filter(a=>a.status==='sold').sort((a,b)=>(b.soldDate||'').localeCompare(a.soldDate||''));
+  const value=assetsValueQAR(), cost=active.reduce((s,a)=>s+assetCost(a),0), exp=value-cost, done=sold.reduce((s,a)=>s+assetPL(a),0);
+  openSheet(`
+   <h2>🚘 Assets</h2>
+   <p class="hint" style="margin-top:0">Things you bought to sell. Their costs stay out of monthly expenses. Bank balances are never changed here.</p>
+   <div class="kv"><span style="font-weight:800">Value in net worth</span><span style="font-weight:800">${fmt(value,'QAR')}</span></div>
+   <div class="kv"><span>Total cost</span><span>${fmt(cost,'QAR')}</span></div>
+   ${Math.abs(exp)>0.5?`<div class="kv"><span>Expected ${exp>=0?'profit':'loss'} at target</span><span style="color:${exp>=0?'var(--green)':'var(--red)'}">${exp>=0?'+':'−'}${fmt(Math.abs(exp),'QAR')}</span></div>`:''}
+   ${sold.length?`<div class="kv"><span>Realized ${done>=0?'profit':'loss'}</span><span style="color:${done>=0?'var(--green)':'var(--red)'}">${done>=0?'+':'−'}${fmt(Math.abs(done),'QAR')}</span></div>`:''}
+   <button class="btn" onclick="openAddAsset()">➕ Add asset</button>
+   <label class="f" style="margin-top:14px">Active</label>
+   <div class="list">${active.length?active.map(a=>{ const c=assetCost(a), t=+a.target||0; return `<div class="item tap" onclick="openAsset('${a.id}')"><div class="em">🚘</div><div class="mid"><div class="t">${esc(a.name)}</div><div class="s">cost ${fmt(c,'QAR')}${t>0?' · target '+fmt(t,'QAR'):''}</div></div><div style="text-align:right"><div class="amt">${fmt(assetValue(a),'QAR')}</div>${t>0?`<div class="s" style="color:${t>=c?'var(--green)':'var(--red)'}">${t>=c?'+':'−'}${fmt(Math.abs(t-c),'QAR')}</div>`:'<div class="s" style="color:var(--accent)">view ›</div>'}</div></div>`; }).join(''):'<div class="empty">No active assets.</div>'}</div>
+   ${sold.length?`<label class="f" style="margin-top:14px">Sold</label><div class="list">${sold.map(a=>{ const pl=assetPL(a); return `<div class="item tap" onclick="openAsset('${a.id}')"><div class="em">✅</div><div class="mid"><div class="t">${esc(a.name)}</div><div class="s">sold ${fmt(a.soldPrice,'QAR')} · ${fmtDate(a.soldDate)}</div></div><div class="amt ${pl>=0?'pos':'neg'}">${pl>=0?'+':'−'}${fmt(Math.abs(pl),'QAR')}</div></div>`; }).join('')}</div>`:''}
+  `);
+}
+function openAddAsset(){
+  openSheet(`
+   <h2>➕ Add asset</h2>
+   <label class="f">Name</label><input id="asName" placeholder="e.g. Toyota Camry">
+   <label class="f">Bank payment for it, if already booked as an expense</label>
+   <select id="asTxn" onchange="asFill(this,'asPrice')">${assetTxnOptions()}</select>
+   <label class="f">Purchase cost</label>
+   <div class="amtrow"><input id="asPrice" type="text" inputmode="decimal" placeholder="0.00"><select id="asPriceCur">${curOptions('QAR')}</select></div>
+   ${dateField('asDate')}
+   <label class="f">Target selling price in QAR (optional)</label>
+   <input id="asTarget" type="text" inputmode="decimal" placeholder="blank = net worth uses total cost">
+   <button class="btn" onclick="saveNewAsset()">Save asset</button>
+   <button class="btn ghost" onclick="openAssets()">← Assets</button>
+  `);
+}
+function saveNewAsset(){
+  const name=document.getElementById('asName').value.trim(), price=num(document.getElementById('asPrice').value), cur=document.getElementById('asPriceCur').value;
+  const rawT=document.getElementById('asTarget').value.trim(), target=rawT===''?null:num(rawT), tid=document.getElementById('asTxn').value;
+  if(!name) return toast('Enter a name'); if(!(price>0)) return toast('Enter the cost'); if(target!=null&&!(target>0)) return toast('Enter a valid target');
+  const a={id:uid(),name,price:Math.round(toQAR(price,cur)*100)/100,date:document.getElementById('asDate').value||today(),target,status:'active',links:[],costs:[]};
+  if(tid&&linkAssetTxn(S.txns.find(t=>t.id===tid),a)) a.links.push(tid);
+  S.assets=S.assets||[]; S.assets.push(a); save(); openAsset(a.id); toast('Asset added');
+}
+function openAsset(id){
+  const a=(S.assets||[]).find(x=>x.id===id); if(!a) return openAssets();
+  const c=assetCost(a), costRows=(a.costs||[]).map(k=>`<div class="kv"><span>${esc(k.label||'Extra cost')} <span class="dim" style="font-size:11px">${fmtDate(k.date)}</span></span><span>${fmt(k.amount,'QAR',k.amount%1?2:0)}${a.status==='sold'?'':` <button class="del" onclick="delAssetCost('${a.id}','${k.id}')">Del</button>`}</span></div>`).join('');
+  if(a.status==='sold'){ const pl=assetPL(a);
+    return openSheet(`
+     <h2>✅ ${esc(a.name)}</h2>
+     <div class="kv"><span>Purchase cost</span><span>${fmt(a.price,'QAR')}</span></div>${costRows}
+     <div class="kv" style="border-top:2px solid var(--line)"><span style="font-weight:800">Total cost</span><span style="font-weight:800">${fmt(c,'QAR')}</span></div>
+     <div class="kv"><span>Sold for · ${fmtDate(a.soldDate)}</span><span>${fmt(a.soldPrice,'QAR')}</span></div>
+     <div class="kv"><span style="font-weight:800">${pl>=0?'Profit':'Loss'}, in revenue</span><span style="font-weight:800;color:${pl>=0?'var(--green)':'var(--red)'}">${pl>=0?'+':'−'}${fmt(Math.abs(pl),'QAR')}</span></div>
+     <button class="btn ghost" onclick="openAssets()">← Assets</button>`);
+  }
+  const t=+a.target||0;
+  openSheet(`
+   <h2>🚘 ${esc(a.name)}</h2>
+   <div class="kv"><span>Purchase cost <span class="dim" style="font-size:11px">${fmtDate(a.date)}</span></span><span>${fmt(a.price,'QAR')}</span></div>
+   ${costRows}
+   <div class="kv" style="border-top:2px solid var(--line)"><span style="font-weight:800">Total cost</span><span style="font-weight:800">${fmt(c,'QAR')}</span></div>
+   <div class="kv"><span>In net worth</span><span>${fmt(assetValue(a),'QAR')} <span class="dim" style="font-size:11px">${t>0?'target':'total cost'}</span></span></div>
+   ${t>0?`<div class="kv"><span>Expected ${t>=c?'profit':'loss'}</span><span style="color:${t>=c?'var(--green)':'var(--red)'}">${t>=c?'+':'−'}${fmt(Math.abs(t-c),'QAR')}</span></div>`:''}
+   <label class="f" style="margin-top:14px">🎯 Target selling price (QAR)</label>
+   <input id="asTargetEdit" type="text" inputmode="decimal" value="${t>0?t:''}" placeholder="blank = net worth uses total cost">
+   <button class="btn ghost" onclick="saveAssetTarget('${a.id}')">Save target</button>
+   <label class="f" style="margin-top:14px">➕ Add cost to this asset</label>
+   <input id="acLabel" placeholder="e.g. Paint, tyres, transport">
+   <select id="acTxn" style="margin-top:8px" onchange="asFill(this,'acAmt','acLabel')"><option value="">Loading</option></select>
+   <div class="amtrow" style="margin-top:8px"><input id="acAmt" type="text" inputmode="decimal" placeholder="0.00"><select id="acAmtCur">${curOptions('QAR')}</select></div>
+   ${dateField('acDate')}
+   <button class="btn ghost" onclick="saveAssetCost('${a.id}')">Add cost</button>
+   <button class="btn" style="margin-top:16px" onclick="openSellAsset('${a.id}')">💰 Mark as sold</button>
+   <button class="btn ghost" onclick="openEditAsset('${a.id}')">✎ Edit name, price or date</button>
+   <button class="btn red" onclick="delAsset('${a.id}')">Delete asset</button>
+   <button class="btn ghost" onclick="openAssets()">← Assets</button>
+  `);
+  document.getElementById('acTxn').innerHTML=assetTxnOptions().replace('>None<','>Bank payment: none<');
+}
+function saveAssetTarget(id){
+  const a=S.assets.find(x=>x.id===id); if(!a) return; const raw=document.getElementById('asTargetEdit').value.trim();
+  if(raw===''){ a.target=null; } else { const n=num(raw); if(!(n>0)) return toast('Enter a valid target'); a.target=n; }
+  save(); openAsset(id); toast('Target saved');
+}
+function saveAssetCost(id){
+  const a=S.assets.find(x=>x.id===id); if(!a) return;
+  const amt=num(document.getElementById('acAmt').value), cur=document.getElementById('acAmtCur').value, tid=document.getElementById('acTxn').value;
+  if(!(amt>0)) return toast('Enter the cost');
+  const linked=!!(tid&&linkAssetTxn(S.txns.find(t=>t.id===tid),a));
+  a.costs=a.costs||[]; a.costs.push({id:uid(),label:document.getElementById('acLabel').value.trim()||'Extra cost',amount:Math.round(toQAR(amt,cur)*100)/100,date:document.getElementById('acDate').value||today(),txnId:linked?tid:null});
+  save(); openAsset(id); toast('Cost added');
+}
+function delAssetCost(id,cid){
+  const a=S.assets.find(x=>x.id===id); if(!a) return; const k=(a.costs||[]).find(x=>x.id===cid); if(!k) return;
+  if(!confirm('Remove this cost from the asset?'+(k.txnId?' Its bank payment returns to expenses.':''))) return;
+  if(k.txnId) unlinkAssetTxn(k.txnId); a.costs=a.costs.filter(x=>x.id!==cid); save(); openAsset(id);
+}
+function openEditAsset(id){
+  const a=S.assets.find(x=>x.id===id); if(!a) return;
+  openSheet(`
+   <h2>✎ ${esc(a.name)}</h2>
+   <label class="f">Name</label><input id="aeName" value="${esc(a.name)}">
+   <label class="f">Purchase cost (QAR)</label><input id="aePrice" type="text" inputmode="decimal" value="${a.price}">
+   <label class="f">Purchase date</label><input type="date" id="aeDate" value="${a.date||''}">
+   <label class="f">Move a purchase payment out of expenses</label>
+   <select id="aeTxn">${assetTxnOptions()}</select>
+   <button class="btn" onclick="saveEditAsset('${a.id}')">Save</button>
+   <button class="btn ghost" onclick="openAsset('${a.id}')">← Back</button>
+  `);
+}
+function saveEditAsset(id){
+  const a=S.assets.find(x=>x.id===id); if(!a) return;
+  const name=document.getElementById('aeName').value.trim(), price=num(document.getElementById('aePrice').value), tid=document.getElementById('aeTxn').value;
+  if(!name) return toast('Enter a name'); if(!(price>0)) return toast('Enter the cost');
+  a.name=name; a.price=price; a.date=document.getElementById('aeDate').value||a.date;
+  if(tid&&linkAssetTxn(S.txns.find(t=>t.id===tid),a)){ a.links=a.links||[]; a.links.push(tid); }
+  save(); openAsset(id); toast('Saved');
+}
+function delAsset(id){
+  const a=S.assets.find(x=>x.id===id); if(!a) return;
+  if(!confirm('Delete '+a.name+'? Its linked bank payments return to expenses.')) return;
+  (a.links||[]).forEach(unlinkAssetTxn); (a.costs||[]).forEach(k=>{ if(k.txnId) unlinkAssetTxn(k.txnId); });
+  S.assets=S.assets.filter(x=>x.id!==id); save(); openAssets(); toast('Deleted');
+}
+function openSellAsset(id){
+  const a=S.assets.find(x=>x.id===id); if(!a) return; const t=+a.target||0;
+  openSheet(`
+   <h2>💰 Sell ${esc(a.name)}</h2>
+   <div class="kv"><span>Total cost</span><span>${fmt(assetCost(a),'QAR')}</span></div>
+   <label class="f">Sale price</label>
+   <div class="amtrow"><input id="asSold" type="text" inputmode="decimal" value="${t>0?t:''}" placeholder="0.00" oninput="asSalePreview('${a.id}')"><select id="asSoldCur" onchange="asSalePreview('${a.id}')">${curOptions('QAR')}</select></div>
+   ${dateField('asSoldDate')}
+   <div class="kv" id="asSalePL" style="margin-top:8px"></div>
+   <p class="hint">The profit or loss goes to revenue in this month. Your bank balance is not changed here, because the bank message adds the money.</p>
+   <button class="btn" onclick="sellAsset('${a.id}')">Confirm sale</button>
+   <button class="btn ghost" onclick="openAsset('${a.id}')">← Back</button>
+  `);
+  asSalePreview(id);
+}
+function asSalePreview(id){
+  const a=S.assets.find(x=>x.id===id), el=document.getElementById('asSalePL'); if(!a||!el) return;
+  const n=num(document.getElementById('asSold').value); if(!(n>0)){ el.innerHTML='<span>Profit or loss</span><span>—</span>'; return; }
+  const pl=toQAR(n,document.getElementById('asSoldCur').value)-assetCost(a);
+  el.innerHTML=`<span style="font-weight:800">${pl>=0?'Profit':'Loss'}</span><span style="font-weight:800;color:${pl>=0?'var(--green)':'var(--red)'}">${pl>=0?'+':'−'}${fmt(Math.abs(pl),'QAR')}</span>`;
+}
+function sellAsset(id){
+  const a=S.assets.find(x=>x.id===id); if(!a) return;
+  const n=num(document.getElementById('asSold').value); if(!(n>0)) return toast('Enter the sale price');
+  const sold=Math.round(toQAR(n,document.getElementById('asSoldCur').value)*100)/100, pl=sold-assetCost(a);
+  if(!confirm('Sell '+a.name+' for '+fmt(sold,'QAR')+'?\n'+(pl>=0?'Profit ':'Loss ')+fmt(Math.abs(pl),'QAR')+' goes to revenue. A sale cannot be undone.')) return;
+  a.status='sold'; a.soldPrice=sold; a.soldDate=document.getElementById('asSoldDate').value||today();
+  save(); openAssets(); toast((pl>=0?'Profit ':'Loss ')+fmt(Math.abs(pl),'QAR')+' added to revenue');
 }
 /* ---- travel: my own fixed exchange rates (win over live rates; existing SMS entries are re-converted) ---- */
 const TRIP_CURS=['CZK','HUF','EUR','CHF','TRY','PLN','GBP','USD'];
@@ -2127,7 +2330,7 @@ async function syncCloud(opts){
     if(d.state && ((d.updatedAt||0) > (S.updatedAt||0) || localEmpty)){        // remote is newer → adopt
       S={...clone(DEFAULT),...d.state}; localStorage.setItem(LS,JSON.stringify(S));
       retitleOldSms();                                        // re-title merchants on the freshly-adopted data
-      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); migrateFxV2(); migratePastFixedV1(); runAutoRecurring();   // re-apply one-time migrations to adopted data
+      migrateEsraaSplit(); migrateUaeRate(); migrateCatMemory(); seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); migrateFxV2(); migratePastFixedV1(); migrateAssetsV1(); runAutoRecurring();   // re-apply one-time migrations to adopted data
       render();
     }
     const ri=await fetch(base+'/inbox',{headers:cloudHeaders()});
@@ -2684,11 +2887,12 @@ function saveMonthOverride(mapKey, mo, inputId, reopenFn){
   save(); reopenFn(mo); toast('Saved');
 }
 function savingsManual(mo){ const o=S.settings.savingsByMonth||{}; return (o[mo]!=null && o[mo]!=='')? (+o[mo]||0) : null; }
-function savingsForMonth(mo){ const m=savingsManual(mo); return m!=null ? m : salaryForMonth(mo)+carRevForMonth(mo)+genRevForMonth(mo)-expForMonth(mo); }
+function savingsForMonth(mo){ const m=savingsManual(mo); return m!=null ? m : salaryForMonth(mo)+carRevForMonth(mo)+genRevForMonth(mo)+assetPLForMonth(mo)-expForMonth(mo); }
 function activityMonths(){
   const s=new Set([curMonth()]);
   Object.keys(carRevByMonth()).forEach(m=>s.add(m));
   Object.keys(genRevByMonth()).forEach(m=>s.add(m));
+  Object.keys(assetPLByMonth()).forEach(m=>s.add(m));
   Object.keys(expByMonth()).forEach(m=>s.add(m));
   Object.keys(S.settings.salaryByMonth||{}).forEach(m=>s.add(m));
   Object.keys(S.settings.savingsByMonth||{}).forEach(m=>s.add(m));
@@ -2698,16 +2902,16 @@ function openSavings(){
   const months=activityMonths();
   openSheet(`
    <h2>🐖 Savings by month</h2>
-   <div class="between" style="margin-bottom:8px"><p class="hint" style="margin:0">Savings = salary + car revenue + general revenue − expenses. Salary ${fmt(+S.settings.monthlySalary||0,'QAR')}/mo.</p><a onclick="editSalaryBase()" style="color:var(--accent);font-size:12px;white-space:nowrap">✎ Salary</a></div>
+   <div class="between" style="margin-bottom:8px"><p class="hint" style="margin:0">Savings = salary + car revenue + general revenue + asset profit or loss − expenses. Salary ${fmt(+S.settings.monthlySalary||0,'QAR')}/mo.</p><a onclick="editSalaryBase()" style="color:var(--accent);font-size:12px;white-space:nowrap">✎ Salary</a></div>
    <div class="list">${months.map(mo=>{ const v=savingsForMonth(mo); return `
      <div class="item tap" onclick="openSavingsMonth('${mo}')"><div class="em">📅</div>
      <div class="mid"><div class="t">${monthLabel(mo)}${mo===curMonth()?' <span class="badge paid">this month</span>':''}</div>
-     <div class="s">salary ${fmt(salaryForMonth(mo),'QAR')} · cars ${fmt(carRevForMonth(mo),'QAR')}${genRevForMonth(mo)?' · general '+fmt(genRevForMonth(mo),'QAR'):''} · exp ${fmt(expForMonth(mo),'QAR')}</div></div>
+     <div class="s">salary ${fmt(salaryForMonth(mo),'QAR')} · cars ${fmt(carRevForMonth(mo),'QAR')}${genRevForMonth(mo)?' · general '+fmt(genRevForMonth(mo),'QAR'):''}${assetPLForMonth(mo)?' · assets '+fmt(assetPLForMonth(mo),'QAR'):''} · exp ${fmt(expForMonth(mo),'QAR')}</div></div>
      <div style="text-align:right"><div class="amt ${v>=0?'pos':'neg'}">${fmt(v,'QAR')}</div><div class="s" style="color:var(--accent)">view ›</div></div></div>`; }).join('')}</div>
   `);
 }
 function openSavingsMonth(mo){
-  const sal=salaryForMonth(mo), rev=carRevForMonth(mo), gen=genRevForMonth(mo), exp=expForMonth(mo);
+  const sal=salaryForMonth(mo), rev=carRevForMonth(mo), gen=genRevForMonth(mo), apl=assetPLForMonth(mo), exp=expForMonth(mo);
   const manual=savingsManual(mo), sav=savingsForMonth(mo);
   const custom = (S.settings.salaryByMonth||{})[mo]!=null;
   openSheet(`
@@ -2715,13 +2919,14 @@ function openSavingsMonth(mo){
    <div class="kv"><span>💼 Salary${custom?' <span class="badge">custom</span>':''}</span><span style="color:var(--green)">+${fmt(sal,'QAR')}</span></div>
    <div class="kv"><span>📤 Revenue from cars</span><span style="color:var(--green)">+${fmt(rev,'QAR')}</span></div>
    <div class="kv tap" onclick="openCarRevMonth('${mo}')"><span>💵 General revenue <span class="dim" style="font-size:12px">manage ›</span></span><span style="color:var(--green)">+${fmt(gen,'QAR')}</span></div>
+   ${apl?`<div class="kv tap" onclick="openAssets()"><span>🚘 Asset ${apl>0?'profit':'loss'}</span><span style="color:${apl>0?'var(--green)':'var(--red)'}">${apl>0?'+':'−'}${fmt(Math.abs(apl),'QAR')}</span></div>`:''}
    <div class="kv"><span>🧾 Expenses</span><span style="color:var(--red)">−${fmt(exp,'QAR')}</span></div>
    <div class="kv" style="border-top:2px solid var(--line);margin-top:4px"><span style="font-weight:800">Savings${manual!=null?' <span class="badge">manual</span>':''}</span><span style="font-weight:800;color:${sav>=0?'var(--green)':'var(--red)'}">${fmt(sav,'QAR')}</span></div>
 
    <label class="f" style="margin-top:14px">✎ Set savings manually (overrides the calculation)</label>
    <input id="savManual" type="text" inputmode="decimal" value="${manual!=null?manual:''}" placeholder="leave blank to auto-calculate">
    <button class="btn" onclick="saveManualSavings('${mo}')">Save savings</button>
-   ${manual!=null?`<button class="btn ghost" onclick="clearManualSavings('${mo}')">↺ Use auto-calculation (${fmt(sal+rev+gen-exp,'QAR')})</button>`:''}
+   ${manual!=null?`<button class="btn ghost" onclick="clearManualSavings('${mo}')">↺ Use auto-calculation (${fmt(sal+rev+gen+apl-exp,'QAR')})</button>`:''}
 
    <label class="f" style="margin-top:16px">Salary for this month (QAR)</label>
    <input id="savSal" type="text" inputmode="decimal" value="${sal}">
@@ -2825,7 +3030,7 @@ migrateEsraaSplit();      // Shopping↔Esraa rename split (once)
 migrateUaeRate();         // UAE default car revenue 850 → 500 (once)
 migrateCatMemory();       // re-key learned categories to the smarter merchant keys (once)
 runAutoSalary();          // add this month's salary automatically if due
-seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); migrateFxV2(); migratePastFixedV1(); runAutoRecurring();   // fixed monthly expenses + the ثابت كل شهر category
+seedRecurring(); migrateFixedCat(); migrateFixedCatV2(); migrateGenRevV1(); migrateFxV1(); migrateFxV2(); migratePastFixedV1(); migrateAssetsV1(); runAutoRecurring();   // fixed monthly expenses + the ثابت كل شهر category
 recordDailyBalance();     // snapshot today's total balance for the monthly Difference field
 render();
 refreshFX();              // silent live FX on open
