@@ -315,7 +315,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-11-23-move-to-asset';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-11-23-asset-breakdown';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -2162,11 +2162,17 @@ function saveNewAsset(){
 }
 function openAsset(id){
   const a=(S.assets||[]).find(x=>x.id===id); if(!a) return openAssets();
-  const c=assetCost(a), expd=assetExpensed(a), costRows=(a.costs||[]).map(k=>`<div class="kv" style="align-items:center;gap:8px"><label style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;min-height:32px;cursor:pointer"><input type="checkbox" aria-label="Count ${esc(k.label||'this cost')} in monthly expenses" ${costInExp(k)?'checked':''} ${a.status==='sold'?'disabled':''} onchange="toggleAssetCostExp('${a.id}','${k.id}',this.checked)" style="width:20px;height:20px;flex:none;padding:0;margin:0;accent-color:var(--accent)"><span>${esc(k.label||'Extra cost')} <span class="dim" style="font-size:11px">${fmtDate(k.date)}</span></span></label><span style="white-space:nowrap">${fmt(k.amount,'QAR',k.amount%1?2:0)}${a.status==='sold'?'':` <button class="del" onclick="delAssetCost('${a.id}','${k.id}')">Del</button>`}</span></div>`).join('');
+  const sold=a.status==='sold', c=assetCost(a), expd=assetExpensed(a);
+  const btns=h=>sold?'':`<div style="margin-top:2px;white-space:nowrap">${h}</div>`;
+  const srcNames=(a.links||[]).map(id=>{ const x=S.txns.find(t=>t.id===id); return x?(displayTitle(x)||x.title||'').replace(/\s+/g,' ').trim():''; }).filter(Boolean);
+  const purchaseRow=`<div class="kv" style="align-items:center;gap:8px"><span style="flex:1;min-width:0"><b>Purchase</b> <span class="dim" style="font-size:11px">${fmtDate(a.date)}</span>${srcNames.length?`<br><span class="dim" style="font-size:11px">moved from expenses: ${esc(srcNames.join(', '))}</span>`:''}</span><span style="text-align:right">${fmt(a.price,'QAR',a.price%1?2:0)}${btns(`<button class="del" style="color:var(--accent)" onclick="openEditAsset('${a.id}')">Edit</button>`)}</span></div>`;
+  const costRows=(a.costs||[]).map(k=>`<div class="kv" style="align-items:center;gap:8px"><label style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;min-height:32px;cursor:pointer"><input type="checkbox" aria-label="Count ${esc(k.label||'this cost')} in monthly expenses" ${costInExp(k)?'checked':''} ${sold?'disabled':''} onchange="toggleAssetCostExp('${a.id}','${k.id}',this.checked)" style="width:20px;height:20px;flex:none;padding:0;margin:0;accent-color:var(--accent)"><span style="min-width:0">${esc(k.label||'Extra cost')} <span class="dim" style="font-size:11px">${fmtDate(k.date)}</span>${k.txnId?'<br><span class="dim" style="font-size:11px">moved from expenses</span>':''}</span></label><span style="text-align:right">${fmt(k.amount,'QAR',k.amount%1?2:0)}${btns(`<button class="del" style="color:var(--accent)" onclick="openEditAssetCost('${a.id}','${k.id}')">Edit</button> <button class="del" onclick="delAssetCost('${a.id}','${k.id}')">Del</button>`)}</span></div>`).join('');
+  const head=ic=>`<h2>${ic} ${esc(a.name)} <a onclick="openRenameAsset('${a.id}')" style="color:var(--accent);font-size:13px;font-weight:600;white-space:nowrap;cursor:pointer">✎ Rename</a></h2>`;
   if(a.status==='sold'){ const pl=assetRealPL(a), toRev=assetPL(a);
     return openSheet(`
-     <h2>✅ ${esc(a.name)}</h2>
-     <div class="kv"><span>Purchase cost</span><span>${fmt(a.price,'QAR')}</span></div>${costRows}
+     ${head('✅')}
+     <label class="f">Cost breakdown</label>
+     ${purchaseRow}${costRows}
      <div class="kv" style="border-top:2px solid var(--line)"><span style="font-weight:800">Total cost</span><span style="font-weight:800">${fmt(c,'QAR')}</span></div>
      <div class="kv"><span>Sold for · ${fmtDate(a.soldDate)}</span><span>${fmt(a.soldPrice,'QAR')}</span></div>
      <div class="kv"><span style="font-weight:800">${pl>=0?'Profit':'Loss'}${expd?'':', in revenue'}</span><span style="font-weight:800;color:${pl>=0?'var(--green)':'var(--red)'}">${pl>=0?'+':'−'}${fmt(Math.abs(pl),'QAR')}</span></div>
@@ -2175,30 +2181,29 @@ function openAsset(id){
   }
   const t=+a.target||0;
   openSheet(`
-   <h2>🚘 ${esc(a.name)}</h2>
-   <div class="kv"><span>Purchase cost <span class="dim" style="font-size:11px">${fmtDate(a.date)}</span></span><span>${fmt(a.price,'QAR')}</span></div>
-   ${(a.costs||[]).length?'<p class="hint" style="margin:8px 0 2px">☑ Tick a line to count it in monthly expenses.</p>':''}
+   ${head('🚘')}
+   <label class="f">Cost breakdown</label>
+   ${purchaseRow}
    ${costRows}
+   ${(a.costs||[]).length?'<p class="hint" style="margin:6px 0 2px">☑ Tick a cost to also count it in monthly expenses.</p>':''}
    <div class="kv" style="border-top:2px solid var(--line)"><span style="font-weight:800">Total cost</span><span style="font-weight:800">${fmt(c,'QAR')}</span></div>
    ${expd?`<div class="kv"><span>Of which counted in expenses</span><span>${fmt(expd,'QAR')}</span></div>`:''}
    <div class="kv"><span>In net worth</span><span>${fmt(assetValue(a),'QAR')} <span class="dim" style="font-size:11px">${t>0?'target':'total cost'}</span></span></div>
    ${t>0?`<div class="kv"><span>Expected ${t>=c?'profit':'loss'}</span><span style="color:${t>=c?'var(--green)':'var(--red)'}">${t>=c?'+':'−'}${fmt(Math.abs(t-c),'QAR')}</span></div>`:''}
-   <label class="f" style="margin-top:14px">🎯 Target selling price (QAR)</label>
-   <input id="asTargetEdit" type="text" inputmode="decimal" value="${t>0?t:''}" placeholder="blank = net worth uses total cost">
-   <button class="btn ghost" onclick="saveAssetTarget('${a.id}')">Save target</button>
    <label class="f" style="margin-top:14px">➕ Add cost to this asset</label>
    <input id="acLabel" placeholder="e.g. Paint, tyres, transport">
-   <select id="acTxn" style="margin-top:8px" onchange="asFill(this,'acAmt','acLabel')"><option value="">Loading</option></select>
    <div class="amtrow" style="margin-top:8px"><input id="acAmt" type="text" inputmode="decimal" placeholder="0.00"><select id="acAmtCur">${curOptions('QAR')}</select></div>
    ${dateField('acDate')}
    <label style="display:flex;align-items:center;gap:10px;min-height:40px;font-size:13px;cursor:pointer"><input id="acInExp" type="checkbox" style="width:20px;height:20px;flex:none;padding:0;margin:0;accent-color:var(--accent)">Count in monthly expenses</label>
    <button class="btn ghost" onclick="saveAssetCost('${a.id}')">Add cost</button>
+   <label class="f" style="margin-top:14px">🎯 Target selling price (QAR)</label>
+   <input id="asTargetEdit" type="text" inputmode="decimal" value="${t>0?t:''}" placeholder="blank = net worth uses total cost">
+   <button class="btn ghost" onclick="saveAssetTarget('${a.id}')">Save target</button>
    <button class="btn" style="margin-top:16px" onclick="openSellAsset('${a.id}')">💰 Mark as sold</button>
-   <button class="btn ghost" onclick="openEditAsset('${a.id}')">✎ Edit name, price or date</button>
+   <button class="btn ghost" onclick="openEditAsset('${a.id}')">✎ Edit name, purchase price or date</button>
    <button class="btn red" onclick="delAsset('${a.id}')">Delete asset</button>
    <button class="btn ghost" onclick="openAssets()">← Assets</button>
   `);
-  document.getElementById('acTxn').innerHTML=assetTxnOptions().replace('>None<','>Bank payment: none<');
 }
 function saveAssetTarget(id){
   const a=S.assets.find(x=>x.id===id); if(!a) return; const raw=document.getElementById('asTargetEdit').value.trim();
@@ -2207,7 +2212,7 @@ function saveAssetTarget(id){
 }
 function saveAssetCost(id){
   const a=S.assets.find(x=>x.id===id); if(!a) return;
-  const amt=num(document.getElementById('acAmt').value), cur=document.getElementById('acAmtCur').value, tid=document.getElementById('acTxn').value;
+  const amt=num(document.getElementById('acAmt').value), cur=document.getElementById('acAmtCur').value, tid='';   // costs are typed here; existing expenses come in through Move to assets
   if(!(amt>0)) return toast('Enter the cost');
   const inExp=document.getElementById('acInExp').checked;
   const linked=!!(tid&&linkAssetTxn(S.txns.find(t=>t.id===tid),a));
@@ -2238,6 +2243,45 @@ function delAssetCost(id,cid){
   if(!confirm('Remove this cost from the asset?'+(k.txnId?' Its bank payment returns to expenses.':''))) return;
   if(k.expTxnId) S.txns=S.txns.filter(t=>t.id!==k.expTxnId);
   if(k.txnId) unlinkAssetTxn(k.txnId); a.costs=a.costs.filter(x=>x.id!==cid); save(); openAsset(id);
+}
+function openRenameAsset(id){
+  const a=(S.assets||[]).find(x=>x.id===id); if(!a) return;
+  openSheet(`
+   <h2>✎ Rename asset</h2>
+   <label class="f">Name</label><input id="arName" value="${esc(a.name)}">
+   <button class="btn" onclick="saveRenameAsset('${a.id}')">Save name</button>
+   <button class="btn ghost" onclick="openAsset('${a.id}')">← Back</button>
+  `);
+  const el=document.getElementById('arName'); if(el){ el.focus(); el.select(); }
+}
+function saveRenameAsset(id){
+  const a=(S.assets||[]).find(x=>x.id===id); if(!a) return; const name=document.getElementById('arName').value.trim(); if(!name) return toast('Enter a name');
+  a.name=name; S.txns.forEach(x=>{ if(x.assetId===a.id) x.sub='Moved to asset · '+name; else if(x.assetCost===a.id) x.sub='Asset cost · '+name; });   // keep the activity notes in step
+  save(); openAsset(id); toast('Renamed');
+}
+function openEditAssetCost(id,cid){
+  const a=(S.assets||[]).find(x=>x.id===id); if(!a||a.status==='sold') return; const k=(a.costs||[]).find(x=>x.id===cid); if(!k) return;
+  openSheet(`
+   <h2>✎ Edit cost</h2>
+   <p class="hint" style="margin-top:0">${esc(a.name)}${k.txnId?' · moved from expenses':''}</p>
+   <label class="f">Name</label><input id="ecLabel" value="${esc(k.label||'')}">
+   <label class="f">Amount (QAR)</label><input id="ecAmt" type="text" inputmode="decimal" value="${k.amount}">
+   <label class="f">Date</label><input type="date" id="ecDate" value="${k.date||''}">
+   <label style="display:flex;align-items:center;gap:10px;min-height:40px;font-size:13px;cursor:pointer"><input id="ecInExp" type="checkbox" ${costInExp(k)?'checked':''} style="width:20px;height:20px;flex:none;padding:0;margin:0;accent-color:var(--accent)">Count in monthly expenses</label>
+   <button class="btn" onclick="saveEditAssetCost('${a.id}','${k.id}')">Save changes</button>
+   <button class="btn ghost" onclick="openAsset('${a.id}')">← Back</button>
+  `);
+}
+function saveEditAssetCost(id,cid){
+  const a=(S.assets||[]).find(x=>x.id===id); if(!a||a.status==='sold') return; const k=(a.costs||[]).find(x=>x.id===cid); if(!k) return;
+  const label=document.getElementById('ecLabel').value.trim()||'Extra cost', amt=num(document.getElementById('ecAmt').value), date=document.getElementById('ecDate').value||k.date||today();
+  if(!(amt>0)) return toast('Enter the amount');
+  k.label=label; k.amount=Math.round(amt*100)/100; k.date=date;
+  // keep the linked expense entries in step, so the totals stay right if this cost returns to (or counts in) expenses
+  const x=k.txnId?S.txns.find(t=>t.id===k.txnId):null; if(x){ x.amount=k.amount; x.currency='QAR'; x.date=date; }
+  const m=k.expTxnId?S.txns.find(t=>t.id===k.expTxnId):null; if(m){ m.amount=k.amount; m.currency='QAR'; m.date=date; m.title=label; if(m.edit) m.edit.detail=label; }
+  setCostInExp(a,k,document.getElementById('ecInExp').checked);
+  save(); openAsset(id); toast('Cost updated');
 }
 function openEditAsset(id){
   const a=S.assets.find(x=>x.id===id); if(!a) return;
