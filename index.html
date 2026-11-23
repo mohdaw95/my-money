@@ -260,7 +260,10 @@ function genRevToDay(mo,dayCap){ return S.txns.filter(x=>isGenRev(x)&&(x.date||'
 function assetCost(a){ return (+a.price||0)+(a.costs||[]).reduce((s,c)=>s+(+c.amount||0),0); }
 function assetValue(a){ if(a.status==='sold') return 0; const t=+a.target||0; return t>0?t:assetCost(a); }   // target price if set, otherwise total cost
 function assetsValueQAR(){ return (S.assets||[]).reduce((s,a)=>s+assetValue(a),0); }
-function assetPL(a){ return (+a.soldPrice||0)-assetCost(a); }
+function costInExp(k){ if(k.expTxnId && S.txns.some(t=>t.id===k.expTxnId)) return true; if(k.txnId){ const x=S.txns.find(t=>t.id===k.txnId); return !!x && x.dir<0; } return false; }   // ticked = this cost also counts in monthly expenses
+function assetExpensed(a){ return (a.costs||[]).reduce((s,k)=>s+(costInExp(k)?(+k.amount||0):0),0); }
+function assetRealPL(a){ return (+a.soldPrice||0)-assetCost(a); }                       // the true profit or loss on the asset
+function assetPL(a){ return assetRealPL(a)+assetExpensed(a); }                          // the part that goes to revenue (ticked costs already hit Savings as expenses)
 function assetPLByMonth(){ const m={}; (S.assets||[]).filter(a=>a.status==='sold').forEach(a=>{ const mo=(a.soldDate||today()).slice(0,7); if(!m[mo])m[mo]={total:0,items:[]}; m[mo].total+=assetPL(a); m[mo].items.push(a); }); return m; }
 function assetPLForMonth(mo){ const g=assetPLByMonth()[mo]; return g?g.total:0; }
 function assetPLToDay(mo,dayCap){ return (S.assets||[]).filter(a=>a.status==='sold'&&(a.soldDate||'').slice(0,7)===mo&&+(a.soldDate||'').slice(8,10)<=dayCap).reduce((s,a)=>s+assetPL(a),0); }
@@ -312,7 +315,7 @@ function num(v){
   s=s.replace(/[^0-9.\-]/g,'');
   return parseFloat(s);
 }
-const APP_VERSION='2026-11-23-assets';   // bump on every deploy so phones auto-refresh
+const APP_VERSION='2026-11-23-asset-exp-tick';   // bump on every deploy so phones auto-refresh
 // self-update: fetch the live index bypassing cache; if a newer version is out, reload into it
 async function checkUpdate(){
   try{
@@ -2068,10 +2071,10 @@ function asFill(sel,amtId,labelId){
 function openAssets(){
   _sheetBack=openAssets;
   const all=S.assets||[], active=all.filter(a=>a.status!=='sold'), sold=all.filter(a=>a.status==='sold').sort((a,b)=>(b.soldDate||'').localeCompare(a.soldDate||''));
-  const value=assetsValueQAR(), cost=active.reduce((s,a)=>s+assetCost(a),0), exp=value-cost, done=sold.reduce((s,a)=>s+assetPL(a),0);
+  const value=assetsValueQAR(), cost=active.reduce((s,a)=>s+assetCost(a),0), exp=value-cost, done=sold.reduce((s,a)=>s+assetRealPL(a),0);
   openSheet(`
    <h2>🚘 Assets</h2>
-   <p class="hint" style="margin-top:0">Things you bought to sell. Their costs stay out of monthly expenses. Bank balances are never changed here.</p>
+   <p class="hint" style="margin-top:0">Things you bought to sell. Their costs stay out of monthly expenses unless you tick them. Bank balances are never changed here.</p>
    <div class="kv"><span style="font-weight:800">Value in net worth</span><span style="font-weight:800">${fmt(value,'QAR')}</span></div>
    <div class="kv"><span>Total cost</span><span>${fmt(cost,'QAR')}</span></div>
    ${Math.abs(exp)>0.5?`<div class="kv"><span>Expected ${exp>=0?'profit':'loss'} at target</span><span style="color:${exp>=0?'var(--green)':'var(--red)'}">${exp>=0?'+':'−'}${fmt(Math.abs(exp),'QAR')}</span></div>`:''}
@@ -2079,7 +2082,7 @@ function openAssets(){
    <button class="btn" onclick="openAddAsset()">➕ Add asset</button>
    <label class="f" style="margin-top:14px">Active</label>
    <div class="list">${active.length?active.map(a=>{ const c=assetCost(a), t=+a.target||0; return `<div class="item tap" onclick="openAsset('${a.id}')"><div class="em">🚘</div><div class="mid"><div class="t">${esc(a.name)}</div><div class="s">cost ${fmt(c,'QAR')}${t>0?' · target '+fmt(t,'QAR'):''}</div></div><div style="text-align:right"><div class="amt">${fmt(assetValue(a),'QAR')}</div>${t>0?`<div class="s" style="color:${t>=c?'var(--green)':'var(--red)'}">${t>=c?'+':'−'}${fmt(Math.abs(t-c),'QAR')}</div>`:'<div class="s" style="color:var(--accent)">view ›</div>'}</div></div>`; }).join(''):'<div class="empty">No active assets.</div>'}</div>
-   ${sold.length?`<label class="f" style="margin-top:14px">Sold</label><div class="list">${sold.map(a=>{ const pl=assetPL(a); return `<div class="item tap" onclick="openAsset('${a.id}')"><div class="em">✅</div><div class="mid"><div class="t">${esc(a.name)}</div><div class="s">sold ${fmt(a.soldPrice,'QAR')} · ${fmtDate(a.soldDate)}</div></div><div class="amt ${pl>=0?'pos':'neg'}">${pl>=0?'+':'−'}${fmt(Math.abs(pl),'QAR')}</div></div>`; }).join('')}</div>`:''}
+   ${sold.length?`<label class="f" style="margin-top:14px">Sold</label><div class="list">${sold.map(a=>{ const pl=assetRealPL(a); return `<div class="item tap" onclick="openAsset('${a.id}')"><div class="em">✅</div><div class="mid"><div class="t">${esc(a.name)}</div><div class="s">sold ${fmt(a.soldPrice,'QAR')} · ${fmtDate(a.soldDate)}</div></div><div class="amt ${pl>=0?'pos':'neg'}">${pl>=0?'+':'−'}${fmt(Math.abs(pl),'QAR')}</div></div>`; }).join('')}</div>`:''}
   `);
 }
 function openAddAsset(){
@@ -2107,22 +2110,25 @@ function saveNewAsset(){
 }
 function openAsset(id){
   const a=(S.assets||[]).find(x=>x.id===id); if(!a) return openAssets();
-  const c=assetCost(a), costRows=(a.costs||[]).map(k=>`<div class="kv"><span>${esc(k.label||'Extra cost')} <span class="dim" style="font-size:11px">${fmtDate(k.date)}</span></span><span>${fmt(k.amount,'QAR',k.amount%1?2:0)}${a.status==='sold'?'':` <button class="del" onclick="delAssetCost('${a.id}','${k.id}')">Del</button>`}</span></div>`).join('');
-  if(a.status==='sold'){ const pl=assetPL(a);
+  const c=assetCost(a), expd=assetExpensed(a), costRows=(a.costs||[]).map(k=>`<div class="kv" style="align-items:center;gap:8px"><label style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;min-height:32px;cursor:pointer"><input type="checkbox" aria-label="Count ${esc(k.label||'this cost')} in monthly expenses" ${costInExp(k)?'checked':''} ${a.status==='sold'?'disabled':''} onchange="toggleAssetCostExp('${a.id}','${k.id}',this.checked)" style="width:20px;height:20px;flex:none;padding:0;margin:0;accent-color:var(--accent)"><span>${esc(k.label||'Extra cost')} <span class="dim" style="font-size:11px">${fmtDate(k.date)}</span></span></label><span style="white-space:nowrap">${fmt(k.amount,'QAR',k.amount%1?2:0)}${a.status==='sold'?'':` <button class="del" onclick="delAssetCost('${a.id}','${k.id}')">Del</button>`}</span></div>`).join('');
+  if(a.status==='sold'){ const pl=assetRealPL(a), toRev=assetPL(a);
     return openSheet(`
      <h2>✅ ${esc(a.name)}</h2>
      <div class="kv"><span>Purchase cost</span><span>${fmt(a.price,'QAR')}</span></div>${costRows}
      <div class="kv" style="border-top:2px solid var(--line)"><span style="font-weight:800">Total cost</span><span style="font-weight:800">${fmt(c,'QAR')}</span></div>
      <div class="kv"><span>Sold for · ${fmtDate(a.soldDate)}</span><span>${fmt(a.soldPrice,'QAR')}</span></div>
-     <div class="kv"><span style="font-weight:800">${pl>=0?'Profit':'Loss'}, in revenue</span><span style="font-weight:800;color:${pl>=0?'var(--green)':'var(--red)'}">${pl>=0?'+':'−'}${fmt(Math.abs(pl),'QAR')}</span></div>
+     <div class="kv"><span style="font-weight:800">${pl>=0?'Profit':'Loss'}${expd?'':', in revenue'}</span><span style="font-weight:800;color:${pl>=0?'var(--green)':'var(--red)'}">${pl>=0?'+':'−'}${fmt(Math.abs(pl),'QAR')}</span></div>
+     ${expd?`<div class="kv"><span>Ticked costs, already in expenses</span><span>${fmt(expd,'QAR')}</span></div><div class="kv"><span>Added to revenue</span><span style="color:${toRev>=0?'var(--green)':'var(--red)'}">${toRev>=0?'+':'−'}${fmt(Math.abs(toRev),'QAR')}</span></div>`:''}
      <button class="btn ghost" onclick="openAssets()">← Assets</button>`);
   }
   const t=+a.target||0;
   openSheet(`
    <h2>🚘 ${esc(a.name)}</h2>
    <div class="kv"><span>Purchase cost <span class="dim" style="font-size:11px">${fmtDate(a.date)}</span></span><span>${fmt(a.price,'QAR')}</span></div>
+   ${(a.costs||[]).length?'<p class="hint" style="margin:8px 0 2px">☑ Tick a line to count it in monthly expenses.</p>':''}
    ${costRows}
    <div class="kv" style="border-top:2px solid var(--line)"><span style="font-weight:800">Total cost</span><span style="font-weight:800">${fmt(c,'QAR')}</span></div>
+   ${expd?`<div class="kv"><span>Of which counted in expenses</span><span>${fmt(expd,'QAR')}</span></div>`:''}
    <div class="kv"><span>In net worth</span><span>${fmt(assetValue(a),'QAR')} <span class="dim" style="font-size:11px">${t>0?'target':'total cost'}</span></span></div>
    ${t>0?`<div class="kv"><span>Expected ${t>=c?'profit':'loss'}</span><span style="color:${t>=c?'var(--green)':'var(--red)'}">${t>=c?'+':'−'}${fmt(Math.abs(t-c),'QAR')}</span></div>`:''}
    <label class="f" style="margin-top:14px">🎯 Target selling price (QAR)</label>
@@ -2133,6 +2139,7 @@ function openAsset(id){
    <select id="acTxn" style="margin-top:8px" onchange="asFill(this,'acAmt','acLabel')"><option value="">Loading</option></select>
    <div class="amtrow" style="margin-top:8px"><input id="acAmt" type="text" inputmode="decimal" placeholder="0.00"><select id="acAmtCur">${curOptions('QAR')}</select></div>
    ${dateField('acDate')}
+   <label style="display:flex;align-items:center;gap:10px;min-height:40px;font-size:13px;cursor:pointer"><input id="acInExp" type="checkbox" style="width:20px;height:20px;flex:none;padding:0;margin:0;accent-color:var(--accent)">Count in monthly expenses</label>
    <button class="btn ghost" onclick="saveAssetCost('${a.id}')">Add cost</button>
    <button class="btn" style="margin-top:16px" onclick="openSellAsset('${a.id}')">💰 Mark as sold</button>
    <button class="btn ghost" onclick="openEditAsset('${a.id}')">✎ Edit name, price or date</button>
@@ -2150,13 +2157,34 @@ function saveAssetCost(id){
   const a=S.assets.find(x=>x.id===id); if(!a) return;
   const amt=num(document.getElementById('acAmt').value), cur=document.getElementById('acAmtCur').value, tid=document.getElementById('acTxn').value;
   if(!(amt>0)) return toast('Enter the cost');
+  const inExp=document.getElementById('acInExp').checked;
   const linked=!!(tid&&linkAssetTxn(S.txns.find(t=>t.id===tid),a));
-  a.costs=a.costs||[]; a.costs.push({id:uid(),label:document.getElementById('acLabel').value.trim()||'Extra cost',amount:Math.round(toQAR(amt,cur)*100)/100,date:document.getElementById('acDate').value||today(),txnId:linked?tid:null});
+  const k={id:uid(),label:document.getElementById('acLabel').value.trim()||'Extra cost',amount:Math.round(toQAR(amt,cur)*100)/100,date:document.getElementById('acDate').value||today(),txnId:linked?tid:null};
+  a.costs=a.costs||[]; a.costs.push(k); if(inExp) setCostInExp(a,k,true);
   save(); openAsset(id); toast('Cost added');
+}
+/* tick = count this cost in monthly expenses. Never touches a bank balance, the asset's cost, or net worth. */
+function setCostInExp(a,k,on){
+  if(costInExp(k)===on) return;
+  const x=k.txnId?S.txns.find(t=>t.id===k.txnId):null;
+  if(on){
+    if(x){ unlinkAssetTxn(k.txnId); return; }             // the real bank expense returns to its own month and category
+    const id=uid(); k.expTxnId=id;
+    S.txns.push({id,emoji:'🚘',title:k.label||'Asset cost',sub:'Asset cost · '+a.name,amount:+k.amount||0,currency:'QAR',dir:-1,date:k.date||today(),time:'',effects:null,edit:{kind:'expense',account:'',detail:k.label||'Asset cost'},cat:'Car costs',catEdited:true,assetCost:a.id});
+  }else{
+    if(k.expTxnId){ S.txns=S.txns.filter(t=>t.id!==k.expTxnId); delete k.expTxnId; }
+    if(x) linkAssetTxn(x,a);
+  }
+}
+function toggleAssetCostExp(id,cid,on){
+  const a=(S.assets||[]).find(x=>x.id===id); if(!a||a.status==='sold') return; const k=(a.costs||[]).find(x=>x.id===cid); if(!k) return;
+  const sh=document.getElementById('sheet'), top=sh?sh.scrollTop:0;
+  setCostInExp(a,k,on); save(); openAsset(id); if(sh) sh.scrollTop=top; toast(on?'Counted in expenses':'Removed from expenses');
 }
 function delAssetCost(id,cid){
   const a=S.assets.find(x=>x.id===id); if(!a) return; const k=(a.costs||[]).find(x=>x.id===cid); if(!k) return;
   if(!confirm('Remove this cost from the asset?'+(k.txnId?' Its bank payment returns to expenses.':''))) return;
+  if(k.expTxnId) S.txns=S.txns.filter(t=>t.id!==k.expTxnId);
   if(k.txnId) unlinkAssetTxn(k.txnId); a.costs=a.costs.filter(x=>x.id!==cid); save(); openAsset(id);
 }
 function openEditAsset(id){
@@ -2183,7 +2211,7 @@ function saveEditAsset(id){
 function delAsset(id){
   const a=S.assets.find(x=>x.id===id); if(!a) return;
   if(!confirm('Delete '+a.name+'? Its linked bank payments return to expenses.')) return;
-  (a.links||[]).forEach(unlinkAssetTxn); (a.costs||[]).forEach(k=>{ if(k.txnId) unlinkAssetTxn(k.txnId); });
+  (a.links||[]).forEach(unlinkAssetTxn); (a.costs||[]).forEach(k=>{ if(k.expTxnId) S.txns=S.txns.filter(t=>t.id!==k.expTxnId); if(k.txnId) unlinkAssetTxn(k.txnId); });
   S.assets=S.assets.filter(x=>x.id!==id); save(); openAssets(); toast('Deleted');
 }
 function openSellAsset(id){
@@ -2204,16 +2232,16 @@ function openSellAsset(id){
 function asSalePreview(id){
   const a=S.assets.find(x=>x.id===id), el=document.getElementById('asSalePL'); if(!a||!el) return;
   const n=num(document.getElementById('asSold').value); if(!(n>0)){ el.innerHTML='<span>Profit or loss</span><span>—</span>'; return; }
-  const pl=toQAR(n,document.getElementById('asSoldCur').value)-assetCost(a);
-  el.innerHTML=`<span style="font-weight:800">${pl>=0?'Profit':'Loss'}</span><span style="font-weight:800;color:${pl>=0?'var(--green)':'var(--red)'}">${pl>=0?'+':'−'}${fmt(Math.abs(pl),'QAR')}</span>`;
+  const pl=toQAR(n,document.getElementById('asSoldCur').value)-assetCost(a), ex=assetExpensed(a), rv=pl+ex;
+  el.innerHTML=`<span style="font-weight:800">${pl>=0?'Profit':'Loss'}</span><span style="text-align:right"><span style="font-weight:800;color:${pl>=0?'var(--green)':'var(--red)'}">${pl>=0?'+':'−'}${fmt(Math.abs(pl),'QAR')}</span>${ex?`<br><span class="dim" style="font-size:11px">revenue ${rv>=0?'+':'−'}${fmt(Math.abs(rv),'QAR')}, as ${fmt(ex,'QAR')} is already in expenses</span>`:''}</span>`;
 }
 function sellAsset(id){
   const a=S.assets.find(x=>x.id===id); if(!a) return;
   const n=num(document.getElementById('asSold').value); if(!(n>0)) return toast('Enter the sale price');
-  const sold=Math.round(toQAR(n,document.getElementById('asSoldCur').value)*100)/100, pl=sold-assetCost(a);
-  if(!confirm('Sell '+a.name+' for '+fmt(sold,'QAR')+'?\n'+(pl>=0?'Profit ':'Loss ')+fmt(Math.abs(pl),'QAR')+' goes to revenue. A sale cannot be undone.')) return;
+  const sold=Math.round(toQAR(n,document.getElementById('asSoldCur').value)*100)/100, pl=sold-assetCost(a), ex=assetExpensed(a), rv=pl+ex;
+  if(!confirm('Sell '+a.name+' for '+fmt(sold,'QAR')+'?\n'+(pl>=0?'Profit ':'Loss ')+fmt(Math.abs(pl),'QAR')+(ex?'. Revenue changes by '+(rv>=0?'+':'−')+fmt(Math.abs(rv),'QAR')+' because '+fmt(ex,'QAR')+' is already in expenses':' goes to revenue')+'. A sale cannot be undone.')) return;
   a.status='sold'; a.soldPrice=sold; a.soldDate=document.getElementById('asSoldDate').value||today();
-  save(); openAssets(); toast((pl>=0?'Profit ':'Loss ')+fmt(Math.abs(pl),'QAR')+' added to revenue');
+  save(); openAssets(); toast((pl>=0?'Profit ':'Loss ')+fmt(Math.abs(pl),'QAR')+' saved');
 }
 /* ---- travel: my own fixed exchange rates (win over live rates; existing SMS entries are re-converted) ---- */
 const TRIP_CURS=['CZK','HUF','EUR','CHF','TRY','PLN','GBP','USD'];
